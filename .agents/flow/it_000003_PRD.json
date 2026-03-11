@@ -1,0 +1,232 @@
+{
+  "goals": [
+    "Initialise a Mastra agent on the backend with a Narrator system prompt defining its RPG storyteller role.",
+    "Provide a `generate_image` tool the agent can call autonomously when it needs to illustrate a scene.",
+    "Expose `POST /chat` so a caller can send a player message and receive a full narrative response.",
+    "Expose `WebSocket /ws` so response tokens are streamed to the client in real time, with the",
+    "Ship integration tests (Media Service mocked) that can be run with `bun test` to confirm"
+  ],
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Mastra agent initialised with Narrator system prompt",
+      "description": "As a developer, I want a Mastra agent registered on the ElysiaJS backend with a Narrator system prompt so that all subsequent player interactions are handled by a character-consistent RPG storyteller.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-001-AC01",
+          "text": "A Mastra `Agent` instance is created in `apps/backend` with an `id` of `\"narrator\"`."
+        },
+        {
+          "id": "US-001-AC02",
+          "text": "The system prompt defines the agent as an imaginative RPG narrator that builds the world"
+        },
+        {
+          "id": "US-001-AC03",
+          "text": "The agent is accessible as a singleton (e.g. exported from `src/agent/narrator.ts`)."
+        },
+        {
+          "id": "US-001-AC04",
+          "text": "The backend starts cleanly with `bun run dev` and logs confirm the agent is registered."
+        },
+        {
+          "id": "US-001-AC05",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "`generate_image` tool wired to Media Service",
+      "description": "As a Mastra agent, I want a `generate_image` tool I can call with a text prompt so that I can request scene images from the Media Service without hard-coding HTTP logic inside the agent.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-002-AC01",
+          "text": "A Mastra tool named `generate_image` is defined and registered on the Narrator agent."
+        },
+        {
+          "id": "US-002-AC02",
+          "text": "The tool accepts a single string parameter `prompt`."
+        },
+        {
+          "id": "US-002-AC03",
+          "text": "On invocation it calls `POST /generate/image` on the Media Service (URL from env var"
+        },
+        {
+          "id": "US-002-AC04",
+          "text": "It polls `GET /jobs/{job_id}` at a configurable interval (default 2 s) until the job"
+        },
+        {
+          "id": "US-002-AC05",
+          "text": "On `\"done\"` it returns the `image_b64` string to the agent."
+        },
+        {
+          "id": "US-002-AC06",
+          "text": "On `\"failed\"` it returns a structured error string: `\"Image generation failed: <error message>\"`."
+        },
+        {
+          "id": "US-002-AC07",
+          "text": "Poll timeout defaults to 120 s; exceeded polls return the same structured error."
+        },
+        {
+          "id": "US-002-AC08",
+          "text": "The tool is created via `createGenerateImageTool(client: MediaServiceClient)` factory;"
+        },
+        {
+          "id": "US-002-AC09",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "`POST /chat` REST endpoint",
+      "description": "As a developer, I want a `POST /chat` endpoint that runs a player message through the Narrator agent and returns the full narrative response so that I can verify agent behaviour without a WebSocket client.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-003-AC01",
+          "text": "`POST /chat` accepts JSON body `{ \"message\": \"<player message>\" }`."
+        },
+        {
+          "id": "US-003-AC02",
+          "text": "Response is HTTP 200 with body `{ \"response\": \"<narrative text>\", \"images\": [\"<b64 or url>\", …] }`."
+        },
+        {
+          "id": "US-003-AC03",
+          "text": "Missing or empty `message` returns HTTP 400 with `{ \"error\": \"message is required\" }`."
+        },
+        {
+          "id": "US-003-AC04",
+          "text": "The endpoint calls the Narrator agent and awaits the full response before replying."
+        },
+        {
+          "id": "US-003-AC05",
+          "text": "If the agent invokes `generate_image`, the resulting `image_b64` is included in `images`."
+        },
+        {
+          "id": "US-003-AC06",
+          "text": "Errors from the agent (including tool failures) return HTTP 500 with"
+        },
+        {
+          "id": "US-003-AC07",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "WebSocket `/ws` streaming endpoint",
+      "description": "As a developer (and future frontend), I want a WebSocket endpoint that streams Narrator agent tokens as they are generated so that the UI can show text appearing progressively and display the image at the end.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-004-AC01",
+          "text": "Connecting to `ws://localhost:<BACKEND_PORT>/ws` establishes a WebSocket session."
+        },
+        {
+          "id": "US-004-AC02",
+          "text": "Sending a JSON frame `{ \"message\": \"<player message>\" }` starts agent inference."
+        },
+        {
+          "id": "US-004-AC03",
+          "text": "Each text token is sent as a frame `{ \"type\": \"token\", \"content\": \"<token>\" }`."
+        },
+        {
+          "id": "US-004-AC04",
+          "text": "When a `generate_image` tool call completes, a frame"
+        },
+        {
+          "id": "US-004-AC05",
+          "text": "When the full response is complete, a frame `{ \"type\": \"done\" }` is sent."
+        },
+        {
+          "id": "US-004-AC06",
+          "text": "If an error occurs, a frame `{ \"type\": \"error\", \"message\": \"<description>\" }` is sent"
+        },
+        {
+          "id": "US-004-AC07",
+          "text": "Frames are valid JSON; malformed incoming frames are replied to with an `\"error\"` frame"
+        },
+        {
+          "id": "US-004-AC08",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Integration tests",
+      "description": "As a developer, I want integration tests covering the chat endpoint, WebSocket, and tool flow (Media Service mocked) so that I can confirm correctness before building the frontend.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-005-AC01",
+          "text": "Tests live in `apps/backend/src/__tests__/` and run with `bun test`."
+        },
+        {
+          "id": "US-005-AC02",
+          "text": "`test_chat_endpoint.test.ts`: verifies HTTP 200 response with narrative text; verifies"
+        },
+        {
+          "id": "US-005-AC03",
+          "text": "`test_ws_endpoint.test.ts`: verifies token frames are received; verifies `\"done\"` frame"
+        },
+        {
+          "id": "US-005-AC04",
+          "text": "`test_generate_image_tool.test.ts`: verifies the tool polls until `\"done\"`, returns"
+        },
+        {
+          "id": "US-005-AC05",
+          "text": "The Media Service is mocked via a configurable HTTP client or test double — no real"
+        },
+        {
+          "id": "US-005-AC06",
+          "text": "All tests pass with `bun test` from the repo root."
+        },
+        {
+          "id": "US-005-AC07",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    }
+  ],
+  "functionalRequirements": [
+    {
+      "id": "FR-1",
+      "description": "** Mastra `Agent` with id `\"narrator\"` initialised at backend startup; system prompt"
+    },
+    {
+      "id": "FR-2",
+      "description": "** Mastra tool `generate_image(prompt: string)` registered on the Narrator agent;"
+    },
+    {
+      "id": "FR-3",
+      "description": "** `POST /chat` → HTTP 200 `{ response: string, images: string[] }` or"
+    },
+    {
+      "id": "FR-4",
+      "description": "** `WS /ws` frame protocol: `token | image | done | error` frame types; keeps"
+    },
+    {
+      "id": "FR-5",
+      "description": "** Media Service base URL configured via env var `MEDIA_SERVICE_URL`"
+    },
+    {
+      "id": "FR-6",
+      "description": "** `generate_image` tool uses a poll interval of 2 s and a max wait of 120 s."
+    },
+    {
+      "id": "FR-7",
+      "description": "** The `generate_image` tool must be created via a factory function that receives a"
+    },
+    {
+      "id": "FR-8",
+      "description": "** No `console.log` in production code paths; use structured logging (ElysiaJS logger"
+    },
+    {
+      "id": "FR-9",
+      "description": "** Agent module lives in `apps/backend/src/agent/`; transport handlers (REST + WS)"
+    },
+    {
+      "id": "FR-10",
+      "description": "** All tests run via `bun test`; no extra test runner required."
+    }
+  ]
+}
