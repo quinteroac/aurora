@@ -138,7 +138,11 @@ def test_us_001_ac04_enqueues_background_illustrious_pipeline(monkeypatch) -> No
 
     def fake_pipeline_runner(prompt: str) -> dict[str, str]:
         pipeline_calls.append(prompt)
-        return {"pipeline": "illustrious", "prompt": prompt}
+        return {
+            "image_b64": (
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6X3ioAAAAASUVORK5CYII="
+            )
+        }
 
     monkeypatch.setattr(main.BackgroundTasks, "add_task", fake_add_task)
     monkeypatch.setattr(

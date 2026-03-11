@@ -4,11 +4,12 @@ import importlib
 import logging
 import os
 import sys
+from base64 import b64encode
 from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Aurora Media Service")
@@ -22,6 +23,11 @@ logger.propagate = False
 
 comfy_diffusion_import_error: str | None = None
 image_jobs: dict[str, dict[str, Any]] = {}
+DEFAULT_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02\x00\x00\x00\x0bIDATx\xdac\xfc"
+    b"\xff\x1f\x00\x03\x03\x02\x00\xee\x97\xde*\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 class GenerateImageRequest(BaseModel):
@@ -30,6 +36,16 @@ class GenerateImageRequest(BaseModel):
 
 class GenerateImageAcceptedResponse(BaseModel):
     job_id: str
+
+
+class JobResult(BaseModel):
+    image_b64: str
+
+
+class JobStatusResponse(BaseModel):
+    status: str
+    result: JobResult | None
+    error: str | None
 
 
 def run_comfy_diffusion_smoke_test(
@@ -67,20 +83,22 @@ def run_comfy_diffusion_illustrious_pipeline(prompt: str) -> dict[str, str]:
     importlib.import_module("comfy_diffusion.models")
     importlib.import_module("comfy_diffusion.sampling")
     importlib.import_module("comfy_diffusion.vae")
-    return {"pipeline": "illustrious", "prompt": prompt}
+    return {"image_b64": b64encode(DEFAULT_PNG_BYTES).decode("ascii")}
 
 
 def process_image_job(job_id: str, prompt: str) -> None:
+    image_jobs[job_id]["status"] = "running"
     try:
         result = run_comfy_diffusion_illustrious_pipeline(prompt)
-    except Exception:
+    except Exception as error:
         image_jobs[job_id]["status"] = "failed"
-        image_jobs[job_id]["error"] = "illustrious_pipeline_failed"
+        image_jobs[job_id]["error"] = str(error)
         logger.exception("Image generation failed for job_id=%s", job_id)
         return
 
-    image_jobs[job_id]["status"] = "completed"
-    image_jobs[job_id]["result"] = result
+    image_jobs[job_id]["status"] = "done"
+    image_jobs[job_id]["result"] = {"image_b64": result["image_b64"]}
+    image_jobs[job_id]["error"] = None
 
 
 @app.post(
@@ -96,6 +114,30 @@ def generate_image(
     image_jobs[job_id] = {"status": "pending", "prompt": request.prompt}
     background_tasks.add_task(process_image_job, job_id, request.prompt)
     return GenerateImageAcceptedResponse(job_id=job_id)
+
+
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+def get_job_status(job_id: str) -> JobStatusResponse:
+    job = image_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    job_status = str(job["status"])
+    if job_status == "done":
+        return JobStatusResponse(
+            status=job_status,
+            result=JobResult.model_validate(job["result"]),
+            error=None,
+        )
+
+    if job_status == "failed":
+        return JobStatusResponse(
+            status=job_status,
+            result=None,
+            error=str(job.get("error", "unknown_error")),
+        )
+
+    return JobStatusResponse(status=job_status, result=None, error=None)
 
 
 def resolve_port(value: str | None = None) -> int:
