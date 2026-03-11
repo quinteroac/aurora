@@ -11,7 +11,8 @@
     "lint:ts": "eslint \"apps/**/*.ts\" --max-warnings=0",
     "lint:py": "ruff check services/media",
     "typecheck": "bun run --cwd apps/backend typecheck && bun run --cwd apps/frontend typecheck",
-    "test": "bun --cwd apps/backend test"
+    "test": "bun --cwd apps/backend test",
+    "dev": "./scripts/dev-all.sh"
   },
   "dependencies": {
     "@quinteroac/agents-coding-toolkit": "^0.4.0"
