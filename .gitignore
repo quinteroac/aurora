@@ -122,3 +122,6 @@ playwright-report/
 *.local
 .vercel
 .netlify
+
+FEASIBILITY_ANALYSIS.md
+IDEA.md
