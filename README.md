@@ -1,5 +1,7 @@
 # Aurora
 
+**Work in progress**
+
 > An agentic RPG where you define the universe — the LLM agent builds it, inhabits it, and narrates it in real time.
 
 Aurora is a generative role-playing game with no fixed story. Every playthrough is unique, constructed entirely by an AI agent from the player's initial setting. NPCs have personality, persistent memory, and their own voice. The world reacts visually with images, video, music, and sound effects generated in real time as the narrative unfolds.
