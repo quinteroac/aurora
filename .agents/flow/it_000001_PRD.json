@@ -1,0 +1,218 @@
+{
+  "goals": [
+    "Establish the monorepo workspace structure (`apps/backend`, `apps/frontend`, `services/media`) managed by Bun.",
+    "Confirm all three services start and respond to `GET /health`.",
+    "Verify `comfy-diffusion` can be imported inside the media service (library installed correctly via `uv`).",
+    "Provide a single `bun run dev` (or equivalent) script that boots the full stack.",
+    "Lay down the environment variable convention with `.env.example`."
+  ],
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Monorepo workspace initialised",
+      "description": "As a developer, I want a Bun-managed monorepo with three workspace packages (`apps/backend`, `apps/frontend`, `services/media`) so that I can install all dependencies and run any service from the repo root.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-001-AC01",
+          "text": "Root `package.json` declares workspaces: `apps/backend`, `apps/frontend`, `services/media`."
+        },
+        {
+          "id": "US-001-AC02",
+          "text": "`bun install` at the repo root succeeds and all workspace dependencies are resolved."
+        },
+        {
+          "id": "US-001-AC03",
+          "text": "Python dependencies in `services/media` are managed with `uv` (`pyproject.toml` + `uv.lock`)."
+        },
+        {
+          "id": "US-001-AC04",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Backend service scaffolded and healthy",
+      "description": "As a developer, I want `apps/backend` to be a minimal ElysiaJS app on Bun so that I can verify the backend is running via a health endpoint.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-002-AC01",
+          "text": "`apps/backend` has its own `package.json` (Bun workspace member) with `elysia` as a dependency."
+        },
+        {
+          "id": "US-002-AC02",
+          "text": "`GET /health` returns HTTP 200 with JSON `{ \"status\": \"ok\", \"service\": \"backend\" }`."
+        },
+        {
+          "id": "US-002-AC03",
+          "text": "Service starts with `bun run dev` inside `apps/backend`."
+        },
+        {
+          "id": "US-002-AC04",
+          "text": "Default port is `3000` (configurable via `PORT` env var)."
+        },
+        {
+          "id": "US-002-AC05",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Frontend service scaffolded and reachable",
+      "description": "As a developer, I want `apps/frontend` to be a minimal Vite + React (TypeScript) app so that I can open it in a browser and confirm it loads.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-003-AC01",
+          "text": "`apps/frontend` is scaffolded with Vite + React + TypeScript template."
+        },
+        {
+          "id": "US-003-AC02",
+          "text": "`bun run dev` inside `apps/frontend` starts the Vite dev server on port `5173` (configurable)."
+        },
+        {
+          "id": "US-003-AC03",
+          "text": "Opening `http://localhost:5173` in a browser renders the default Vite/React placeholder page without console errors."
+        },
+        {
+          "id": "US-003-AC04",
+          "text": "Typecheck / lint passes."
+        },
+        {
+          "id": "US-003-AC05",
+          "text": "Visually verified in browser."
+        }
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Media service scaffolded and healthy",
+      "description": "As a developer, I want `services/media` to be a minimal FastAPI app managed with `uv` so that I can verify the service is running via a health endpoint.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-004-AC01",
+          "text": "`services/media` has a `pyproject.toml` declaring `fastapi`, `uvicorn`, and `comfy-diffusion` as dependencies."
+        },
+        {
+          "id": "US-004-AC02",
+          "text": "`uv sync` inside `services/media` installs all dependencies without errors."
+        },
+        {
+          "id": "US-004-AC03",
+          "text": "`GET /health` returns HTTP 200 with JSON `{ \"status\": \"ok\", \"service\": \"media\" }`."
+        },
+        {
+          "id": "US-004-AC04",
+          "text": "Service starts with `uv run uvicorn main:app --reload` (or equivalent script)."
+        },
+        {
+          "id": "US-004-AC05",
+          "text": "Default port is `8000` (configurable via `PORT` env var)."
+        },
+        {
+          "id": "US-004-AC06",
+          "text": "Typecheck / lint passes (ruff or flake8 as available)."
+        }
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "comfy-diffusion import smoke test",
+      "description": "As a developer, I want the media service startup to confirm `comfy-diffusion` imports successfully so that I know the library is installed and the pipeline can be used in future iterations.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-005-AC01",
+          "text": "On application startup, `import comfy_diffusion` (or the library's public API) executes without raising an `ImportError`."
+        },
+        {
+          "id": "US-005-AC02",
+          "text": "If the import fails, the `GET /health` response includes `{ \"status\": \"degraded\", \"error\": \"<message>\" }` instead of `\"ok\"`."
+        },
+        {
+          "id": "US-005-AC03",
+          "text": "The import result is logged to stdout on startup."
+        }
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Environment variable convention",
+      "description": "As a developer, I want a root-level `.env.example` listing all required and optional environment variables so that any contributor can set up the project without hunting for undocumented config.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-006-AC01",
+          "text": "`.env.example` exists at the repo root with entries for: `BACKEND_PORT`, `FRONTEND_PORT`, `MEDIA_PORT`, `OPENAI_API_KEY` (placeholder), `ANTHROPIC_API_KEY` (placeholder)."
+        },
+        {
+          "id": "US-006-AC02",
+          "text": "Each entry has an inline comment describing its purpose."
+        },
+        {
+          "id": "US-006-AC03",
+          "text": "`.env` is listed in `.gitignore`."
+        },
+        {
+          "id": "US-006-AC04",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Unified run scripts",
+      "description": "As a developer, I want root-level Bun scripts to start all services so that I can boot the entire stack with one command.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-007-AC01",
+          "text": "Root `package.json` includes a `dev` script that concurrently starts the backend, frontend, and media service."
+        },
+        {
+          "id": "US-007-AC02",
+          "text": "`bun run dev` from the repo root boots all three services without manual intervention."
+        },
+        {
+          "id": "US-007-AC03",
+          "text": "Each service's output is identifiable in the combined log (prefixed or colour-coded)."
+        },
+        {
+          "id": "US-007-AC04",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    }
+  ],
+  "functionalRequirements": [
+    {
+      "id": "FR-1",
+      "description": "** The monorepo root uses Bun workspaces; all TypeScript packages are members."
+    },
+    {
+      "id": "FR-2",
+      "description": "** Python dependency management in `services/media` uses `uv` exclusively (no pip/poetry); `pyproject.toml` targets `python = \">=3.12\"`."
+    },
+    {
+      "id": "FR-3",
+      "description": "** Backend (`apps/backend`) exposes `GET /health` → `200 { status, service }`."
+    },
+    {
+      "id": "FR-4",
+      "description": "** Media service (`services/media`) exposes `GET /health` → `200 { status, service }` (or `{ status: \"degraded\", error }` if comfy-diffusion import fails)."
+    },
+    {
+      "id": "FR-5",
+      "description": "** Frontend (`apps/frontend`) is a Vite + React + TypeScript project loadable in the browser."
+    },
+    {
+      "id": "FR-6",
+      "description": "** `comfy-diffusion` is declared as a dependency in `services/media/pyproject.toml` and its import is verified at startup."
+    },
+    {
+      "id": "FR-7",
+      "description": "** `.env.example` documents all environment variables used across the monorepo."
+    },
+    {
+      "id": "FR-8",
+      "description": "** A root-level `dev` script uses `concurrently` to start all three services in parallel, with colour-coded per-service log prefixes and automatic kill-all if any service exits with an error."
+    }
+  ]
+}
