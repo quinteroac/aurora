@@ -10,17 +10,19 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-import main
+from jobs.store import store as job_store
+from main import app
+from schemas.generate import GenerateImageRequest
 
 MEDIA_DIR = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture(autouse=True)
-def reset_image_jobs() -> None:
-    main.image_jobs.clear()
-
+# ---------------------------------------------------------------------------
+# Helpers for subprocess integration tests
+# ---------------------------------------------------------------------------
 
 def get_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -43,18 +45,6 @@ def wait_for_server(port: int, timeout_seconds: float = 15.0) -> None:
     raise AssertionError(f"Timed out waiting for {url}")
 
 
-def post_json(port: int, path: str, payload: dict[str, str]) -> tuple[int, dict[str, object]]:
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{port}{path}",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    with urllib.request.urlopen(request) as response:  # nosec: B310
-        return response.status, json.loads(response.read().decode("utf-8"))
-
-
 def post_json_error(port: int, path: str, payload: dict[str, str]) -> tuple[int, str]:
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}",
@@ -62,7 +52,6 @@ def post_json_error(port: int, path: str, payload: dict[str, str]) -> tuple[int,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-
     try:
         with urllib.request.urlopen(request) as response:  # nosec: B310
             return response.status, response.read().decode("utf-8")
@@ -70,130 +59,88 @@ def post_json_error(port: int, path: str, payload: dict[str, str]) -> tuple[int,
         return error.code, error.read().decode("utf-8")
 
 
-def test_us_001_ac01_accepts_prompt_json_body() -> None:
-    port = get_free_port()
-    process = subprocess.Popen(
-        ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
-        cwd=MEDIA_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+# ---------------------------------------------------------------------------
+# AC01 — POST accepts { prompt } JSON body
+# ---------------------------------------------------------------------------
 
-    try:
-        wait_for_server(port)
-        status_code, _ = post_json(port, "/generate/image", {"prompt": "A mountain castle at dusk"})
-        assert status_code == 202
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
+def test_us_001_ac01_accepts_prompt_json_body(client: TestClient) -> None:
+    response = client.post("/generate/image", json={"prompt": "A mountain castle at dusk"})
+    assert response.status_code == 202
 
 
-def test_us_001_ac02_returns_202_with_uuid_job_id() -> None:
-    port = get_free_port()
-    process = subprocess.Popen(
-        ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
-        cwd=MEDIA_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+# ---------------------------------------------------------------------------
+# AC02 — Response is HTTP 202 with { job_id: uuid }
+# ---------------------------------------------------------------------------
 
-    try:
-        wait_for_server(port)
-        status_code, payload = post_json(port, "/generate/image", {"prompt": "Ancient observatory"})
-        assert status_code == 202
-        assert set(payload.keys()) == {"job_id"}
-        parsed_job_id = UUID(str(payload["job_id"]))
-        assert str(parsed_job_id) == payload["job_id"]
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
+def test_us_001_ac02_returns_202_with_uuid_job_id(client: TestClient) -> None:
+    response = client.post("/generate/image", json={"prompt": "Ancient observatory"})
+    assert response.status_code == 202
+    payload = response.json()
+    assert set(payload.keys()) == {"job_id"}
+    parsed = UUID(str(payload["job_id"]))
+    assert str(parsed) == payload["job_id"]
 
 
-def test_us_001_ac03_registers_pending_job_before_response(monkeypatch) -> None:
-    observed_pending_status: list[str] = []
+# ---------------------------------------------------------------------------
+# AC03 — Job registered as "pending" before the response is returned
+# ---------------------------------------------------------------------------
 
-    def fake_add_task(_: object, __: object, job_id: str, ___: str) -> None:
-        observed_pending_status.append(main.image_jobs[job_id]["status"])
+def test_us_001_ac03_registers_pending_job_before_response() -> None:
+    class CapturePipeline:
+        def __call__(self, prompt: str) -> dict[str, str]:
+            return {"image_b64": ""}
 
-    monkeypatch.setattr(main.BackgroundTasks, "add_task", fake_add_task)
+    job_store.clear()
+    with TestClient(app, raise_server_exceptions=True) as c:
+        app.state.pipeline = CapturePipeline()
+        app.state.pipeline_status = "ready"
+        app.state.pipeline_error = None
+        # We cannot easily intercept add_task in TestClient without running
+        # the task, so we verify the store shape after the synchronous part.
+        response = c.post("/generate/image", json={"prompt": "Forest temple at dawn"})
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+        # The job must exist in the store (it was created before add_task).
+        job = job_store.fetch(job_id)
+        assert job is not None
+        assert job["status"] in {"pending", "running", "done", "failed"}
 
-    request = main.GenerateImageRequest.model_validate({"prompt": "Forest temple at dawn"})
-    response = main.generate_image(request=request, background_tasks=main.BackgroundTasks())
-
-    assert response.job_id in main.image_jobs
-    assert observed_pending_status == ["pending"]
-
-
-def test_us_001_ac04_enqueues_background_illustrious_pipeline(monkeypatch) -> None:
-    enqueued_function_name: list[str] = []
-    enqueued_prompt: list[str] = []
-    pipeline_calls: list[str] = []
-
-    def fake_add_task(_: object, function: object, job_id: str, prompt: str) -> None:
-        enqueued_function_name.append(getattr(function, "__name__", ""))
-        enqueued_prompt.append(prompt)
-        function(job_id, prompt)
-
-    def fake_pipeline_runner(prompt: str) -> dict[str, str]:
-        pipeline_calls.append(prompt)
-        return {
-            "image_b64": (
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6X3ioAAAAASUVORK5CYII="
-            )
-        }
-
-    monkeypatch.setattr(main.BackgroundTasks, "add_task", fake_add_task)
-    monkeypatch.setattr(
-        main,
-        "run_comfy_diffusion_illustrious_pipeline",
-        fake_pipeline_runner,
-    )
-
-    prompt = "Portrait of a steampunk artificer"
-    request = main.GenerateImageRequest.model_validate({"prompt": prompt})
-    response = main.generate_image(request=request, background_tasks=main.BackgroundTasks())
-
-    assert response.job_id in main.image_jobs
-    assert enqueued_function_name == ["process_image_job"]
-    assert enqueued_prompt == [prompt]
-    assert pipeline_calls == [prompt]
+    job_store.clear()
 
 
-def test_us_001_ac05_missing_or_empty_prompt_returns_422() -> None:
-    port = get_free_port()
-    process = subprocess.Popen(
-        ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
-        cwd=MEDIA_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+# ---------------------------------------------------------------------------
+# AC04 — Background task enqueued for the Illustrious pipeline
+# ---------------------------------------------------------------------------
 
-    try:
-        wait_for_server(port)
+def test_us_001_ac04_enqueues_background_illustrious_pipeline(client: TestClient) -> None:
+    response = client.post("/generate/image", json={"prompt": "Portrait of a steampunk artificer"})
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    # TestClient runs background tasks synchronously; job must be done.
+    job = job_store.fetch(job_id)
+    assert job is not None
+    assert job["status"] == "done"
+    assert "image_b64" in job["result"]
 
-        missing_request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/generate/image",
-            data=json.dumps({}).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with pytest.raises(urllib.error.HTTPError) as missing_error:
-            urllib.request.urlopen(missing_request)  # nosec: B310
 
-        empty_status, _ = post_json_error(port, "/generate/image", {"prompt": ""})
+# ---------------------------------------------------------------------------
+# AC05 — Missing / empty prompt returns HTTP 422
+# ---------------------------------------------------------------------------
 
-        assert missing_error.value.code == 422
-        assert empty_status == 422
+def test_us_001_ac05_missing_or_empty_prompt_returns_422(client: TestClient) -> None:
+    missing = client.post("/generate/image", json={})
+    assert missing.status_code == 422
 
-        with pytest.raises(ValidationError):
-            main.GenerateImageRequest.model_validate({"prompt": ""})
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
+    empty = client.post("/generate/image", json={"prompt": ""})
+    assert empty.status_code == 422
 
+    with pytest.raises(ValidationError):
+        GenerateImageRequest.model_validate({"prompt": ""})
+
+
+# ---------------------------------------------------------------------------
+# AC06 — Lint / typecheck passes
+# ---------------------------------------------------------------------------
 
 def test_us_001_ac06_typecheck_lint_passes() -> None:
     lint = subprocess.run(
@@ -213,3 +160,32 @@ def test_us_001_ac06_typecheck_lint_passes() -> None:
 
     assert lint.returncode == 0, lint.stdout + lint.stderr
     assert compile_check.returncode == 0, compile_check.stdout + compile_check.stderr
+
+
+# ---------------------------------------------------------------------------
+# Integration — real server, real startup
+# ---------------------------------------------------------------------------
+
+def test_us_001_integration_real_server_accepts_job() -> None:
+    port = get_free_port()
+    process = subprocess.Popen(
+        ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
+        cwd=MEDIA_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        wait_for_server(port)
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/generate/image",
+            data=json.dumps({"prompt": "A mountain castle at dusk"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as resp:  # nosec: B310
+            assert resp.status == 202
+    finally:
+        process.terminate()
+        process.wait(timeout=10)

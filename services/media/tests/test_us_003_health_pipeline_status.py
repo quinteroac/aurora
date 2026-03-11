@@ -3,27 +3,33 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import main
+from fastapi.testclient import TestClient
 
 MEDIA_DIR = Path(__file__).resolve().parents[1]
 
 
-def test_us_003_ac01_health_reports_ready_when_pipeline_loaded() -> None:
-    main.comfy_diffusion_import_error = None
-    main.comfy_diffusion_pipeline_status = "ready"
+# ---------------------------------------------------------------------------
+# AC01 — /health → "ok" when pipeline loaded successfully
+# ---------------------------------------------------------------------------
 
-    assert main.health() == {
-        "status": "ok",
-        "service": "media",
-        "pipeline": "ready",
-    }
+def test_us_003_ac01_health_reports_ready_when_pipeline_loaded(
+    client: TestClient,
+) -> None:
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "service": "media", "pipeline": "ready"}
 
 
-def test_us_003_ac02_health_reports_degraded_when_pipeline_load_fails() -> None:
-    main.comfy_diffusion_import_error = "No module named 'comfy_diffusion'"
-    main.comfy_diffusion_pipeline_status = "unavailable"
+# ---------------------------------------------------------------------------
+# AC02 — /health → "degraded" when pipeline failed to load
+# ---------------------------------------------------------------------------
 
-    assert main.health() == {
+def test_us_003_ac02_health_reports_degraded_when_pipeline_load_fails(
+    degraded_client: TestClient,
+) -> None:
+    resp = degraded_client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {
         "status": "degraded",
         "service": "media",
         "pipeline": "unavailable",
@@ -31,16 +37,25 @@ def test_us_003_ac02_health_reports_degraded_when_pipeline_load_fails() -> None:
     }
 
 
-def test_us_003_ac03_health_reports_loading_while_pipeline_initialises() -> None:
-    main.comfy_diffusion_import_error = None
-    main.comfy_diffusion_pipeline_status = "loading"
+# ---------------------------------------------------------------------------
+# AC03 — /health → "loading" while pipeline still initialising
+# ---------------------------------------------------------------------------
 
-    assert main.health() == {
+def test_us_003_ac03_health_reports_loading_while_pipeline_initialises(
+    loading_client: TestClient,
+) -> None:
+    resp = loading_client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {
         "status": "loading",
         "service": "media",
         "pipeline": "loading",
     }
 
+
+# ---------------------------------------------------------------------------
+# AC04 — Lint / typecheck passes
+# ---------------------------------------------------------------------------
 
 def test_us_003_ac04_typecheck_lint_passes() -> None:
     lint = subprocess.run(

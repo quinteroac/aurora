@@ -9,17 +9,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import pytest
+from fastapi.testclient import TestClient
 
-import main
+from jobs.store import store as job_store
+from pipelines.image import DEFAULT_PNG_BYTES
 
 MEDIA_DIR = Path(__file__).resolve().parents[1]
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-
-
-@pytest.fixture(autouse=True)
-def reset_image_jobs() -> None:
-    main.image_jobs.clear()
 
 
 def get_free_port() -> int:
@@ -43,138 +39,72 @@ def wait_for_server(port: int, timeout_seconds: float = 15.0) -> None:
     raise AssertionError(f"Timed out waiting for {url}")
 
 
-def post_json(port: int, path: str, payload: dict[str, str]) -> tuple[int, dict[str, object]]:
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{port}{path}",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+# ---------------------------------------------------------------------------
+# AC01 — GET /jobs/{job_id} returns 200 with expected body shape
+# ---------------------------------------------------------------------------
 
-    with urllib.request.urlopen(request) as response:  # nosec: B310
-        return response.status, json.loads(response.read().decode("utf-8"))
+def test_us_002_ac01_get_job_returns_200_with_expected_body_shape(
+    client: TestClient,
+) -> None:
+    submit = client.post("/generate/image", json={"prompt": "A lighthouse on a cliff"})
+    assert submit.status_code == 202
+    job_id = submit.json()["job_id"]
 
-
-def get_json(port: int, path: str) -> tuple[int, dict[str, object]]:
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{port}{path}",
-        method="GET",
-    )
-
-    with urllib.request.urlopen(request) as response:  # nosec: B310
-        return response.status, json.loads(response.read().decode("utf-8"))
+    resp = client.get(f"/jobs/{job_id}")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert set(payload.keys()) == {"status", "result", "error"}
+    assert payload["status"] in {"pending", "running", "done", "failed"}
 
 
-def get_json_error(port: int, path: str) -> tuple[int, dict[str, object]]:
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{port}{path}",
-        method="GET",
-    )
+def test_us_002_ac01_returns_expected_result_for_done_and_failed_states(
+    client: TestClient,
+) -> None:
+    image_b64 = base64.b64encode(DEFAULT_PNG_BYTES).decode("ascii")
+    job_store.create("done-job", {"status": "done", "result": {"image_b64": image_b64}})
+    job_store.create("failed-job", {"status": "failed", "error": "pipeline_timeout"})
 
-    try:
-        with urllib.request.urlopen(request) as response:  # nosec: B310
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read().decode("utf-8"))
+    done = client.get("/jobs/done-job").json()
+    failed = client.get("/jobs/failed-job").json()
 
-
-def test_us_002_ac01_get_job_returns_200_with_expected_body_shape() -> None:
-    port = get_free_port()
-    process = subprocess.Popen(
-        ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
-        cwd=MEDIA_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-    try:
-        wait_for_server(port)
-        submit_status, submit_payload = post_json(
-            port,
-            "/generate/image",
-            {"prompt": "A lighthouse on a cliff at sunrise"},
-        )
-        assert submit_status == 202
-
-        job_status, job_payload = get_json(port, f"/jobs/{submit_payload['job_id']}")
-        assert job_status == 200
-        assert set(job_payload.keys()) == {"status", "result", "error"}
-        assert job_payload["status"] in {"pending", "running", "done", "failed"}
-
-        if job_payload["status"] in {"pending", "running"}:
-            assert job_payload["result"] is None
-            assert job_payload["error"] is None
-        elif job_payload["status"] == "done":
-            result = job_payload["result"]
-            assert isinstance(result, dict)
-            assert isinstance(result.get("image_b64"), str)
-            assert job_payload["error"] is None
-        else:
-            assert job_payload["result"] is None
-            assert isinstance(job_payload["error"], str)
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
+    assert done == {"status": "done", "result": {"image_b64": image_b64}, "error": None}
+    assert failed == {"status": "failed", "result": None, "error": "pipeline_timeout"}
 
 
-def test_us_002_ac01_returns_expected_result_for_done_and_failed_states() -> None:
-    image_b64 = base64.b64encode(main.DEFAULT_PNG_BYTES).decode("ascii")
-    main.image_jobs["done-job"] = {"status": "done", "result": {"image_b64": image_b64}}
-    main.image_jobs["failed-job"] = {"status": "failed", "error": "pipeline_timeout"}
+# ---------------------------------------------------------------------------
+# AC02 — Unknown job_id returns 404 { "detail": "Job not found" }
+# ---------------------------------------------------------------------------
 
-    done_response = main.get_job_status("done-job")
-    failed_response = main.get_job_status("failed-job")
-
-    assert done_response.model_dump() == {
-        "status": "done",
-        "result": {"image_b64": image_b64},
-        "error": None,
-    }
-    assert failed_response.model_dump() == {
-        "status": "failed",
-        "result": None,
-        "error": "pipeline_timeout",
-    }
+def test_us_002_ac02_unknown_job_returns_404_with_expected_detail(
+    client: TestClient,
+) -> None:
+    resp = client.get("/jobs/missing-job-id")
+    assert resp.status_code == 404
+    assert resp.json() == {"detail": "Job not found"}
 
 
-def test_us_002_ac02_unknown_job_returns_404_with_expected_detail() -> None:
-    port = get_free_port()
-    process = subprocess.Popen(
-        ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
-        cwd=MEDIA_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+# ---------------------------------------------------------------------------
+# AC03 — image_b64 is a valid base64-encoded PNG
+# ---------------------------------------------------------------------------
 
-    try:
-        wait_for_server(port)
-        status_code, payload = get_json_error(port, "/jobs/missing-job-id")
-        assert status_code == 404
-        assert payload == {"detail": "Job not found"}
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
+def test_us_002_ac03_image_b64_is_valid_base64_png(client: TestClient) -> None:
+    submit = client.post("/generate/image", json={"prompt": "Crystal forest"})
+    assert submit.status_code == 202
+    job_id = submit.json()["job_id"]
 
-
-def test_us_002_ac03_image_b64_is_valid_base64_png(monkeypatch) -> None:
-    image_b64 = base64.b64encode(main.DEFAULT_PNG_BYTES).decode("ascii")
-
-    def fake_pipeline(_: str) -> dict[str, str]:
-        return {"image_b64": image_b64}
-
-    main.image_jobs["job-123"] = {"status": "pending", "prompt": "Crystal forest"}
-    monkeypatch.setattr(main, "run_comfy_diffusion_illustrious_pipeline", fake_pipeline)
-
-    main.process_image_job("job-123", "Crystal forest")
-    payload = main.get_job_status("job-123").model_dump()
-
+    resp = client.get(f"/jobs/{job_id}")
+    assert resp.status_code == 200
+    payload = resp.json()
     assert payload["status"] == "done"
-    encoded = payload["result"]["image_b64"]
+
+    encoded: str = payload["result"]["image_b64"]
     decoded = base64.b64decode(encoded, validate=True)
     assert decoded.startswith(PNG_SIGNATURE)
 
+
+# ---------------------------------------------------------------------------
+# AC04 — Lint / typecheck passes
+# ---------------------------------------------------------------------------
 
 def test_us_002_ac04_typecheck_lint_passes() -> None:
     lint = subprocess.run(
@@ -194,3 +124,43 @@ def test_us_002_ac04_typecheck_lint_passes() -> None:
 
     assert lint.returncode == 0, lint.stdout + lint.stderr
     assert compile_check.returncode == 0, compile_check.stdout + compile_check.stderr
+
+
+# ---------------------------------------------------------------------------
+# Integration — real server round-trip
+# ---------------------------------------------------------------------------
+
+def test_us_002_integration_poll_after_submit() -> None:
+    port = get_free_port()
+    process = subprocess.Popen(
+        ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
+        cwd=MEDIA_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        wait_for_server(port)
+
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/generate/image",
+            data=json.dumps({"prompt": "Crystal forest"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as r:  # nosec: B310
+            job_id = json.loads(r.read().decode("utf-8"))["job_id"]
+
+        req2 = urllib.request.Request(
+            f"http://127.0.0.1:{port}/jobs/{job_id}",
+            method="GET",
+        )
+        with urllib.request.urlopen(req2) as r2:  # nosec: B310
+            payload = json.loads(r2.read().decode("utf-8"))
+
+        assert r2.status == 200
+        assert set(payload.keys()) == {"status", "result", "error"}
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
