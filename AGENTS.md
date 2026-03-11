@@ -24,6 +24,21 @@ See [ROADMAP.md](./ROADMAP.md) for the full development plan (22 iterations acro
 
 ---
 
+## Bundled skills (discoverable at runtime)
+
+`comfy_diffusion` ships distributable skill documents inside the installed package under
+`comfy_diffusion/skills/` (this is separate from repo-local `.agents/skills/`).
+
+To discover them at runtime:
+
+```python
+from comfy_diffusion.skills import get_skills_path
+
+skills_root = get_skills_path()
+
+---
+
 ## Assets language
 
 **All assets must be created in English.**
+
