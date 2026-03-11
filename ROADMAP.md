@@ -28,6 +28,8 @@
 
 **Goal:** Base project structure with all services scaffolded and communicating.
 
+**Status:** Completed — monorepo scaffolded, three services running with health checks, comfy-diffusion smoke test in place, and unified dev script implemented (see `.agents/flow/it_000001_PRD.json` and `.agents/flow/it_000001_progress.json`).
+
 **Deliverables:**
 - Monorepo with workspaces: `apps/backend` (Bun + ElysiaJS), `apps/frontend` (React), `services/media` (Python + FastAPI)
 - `bun nvst init` run — `.agents/` and `docs/nvst-flow/` structure in place
