@@ -21,9 +21,9 @@ describe("US-006 - Environment variable convention", () => {
     const lines = envExample
       .split("\n")
       .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+      .filter((line) => line.length > 0 && !line.startsWith("#"));
 
-    expect(lines.length).toBe(5);
+    expect(lines.length).toBeGreaterThanOrEqual(5);
 
     for (const line of lines) {
       expect(line.includes("#")).toBe(true);

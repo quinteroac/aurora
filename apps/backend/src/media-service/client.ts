@@ -17,6 +17,8 @@ export interface MediaServiceClient {
   getJobStatus(jobId: string): Promise<MediaServiceJobStatus>;
 }
 
+export type HttpFetcher = (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>;
+
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
 
 export const resolveMediaServiceBaseUrl = (env = process.env): string => {
@@ -37,10 +39,13 @@ const readJsonResponse = async <T>(response: Response): Promise<T> => {
 };
 
 export class HttpMediaServiceClient implements MediaServiceClient {
-  constructor(private readonly baseUrl: string = resolveMediaServiceBaseUrl()) {}
+  constructor(
+    private readonly baseUrl: string = resolveMediaServiceBaseUrl(),
+    private readonly fetcher: HttpFetcher = fetch
+  ) {}
 
   async createImageJob(prompt: string): Promise<string> {
-    const response = await fetch(`${this.baseUrl}/generate/image`, {
+    const response = await this.fetcher(`${this.baseUrl}/generate/image`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -61,7 +66,7 @@ export class HttpMediaServiceClient implements MediaServiceClient {
   }
 
   async getJobStatus(jobId: string): Promise<MediaServiceJobStatus> {
-    const response = await fetch(`${this.baseUrl}/jobs/${jobId}`, {
+    const response = await this.fetcher(`${this.baseUrl}/jobs/${jobId}`, {
       method: "GET",
       headers: {
         accept: "application/json",
