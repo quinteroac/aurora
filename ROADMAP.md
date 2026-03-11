@@ -47,7 +47,7 @@
 
 **Deliverables:**
 - `POST /generate/image` — accepts prompt, returns base64 image or URL
-- Integration with comfy-diffusion (Flux / SDXL basic pipeline)
+- Integration with comfy-diffusion (Illustrious basic pipeline)
 - Error and timeout handling
 - `GET /health` endpoint with pipeline status
 

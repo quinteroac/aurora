@@ -1,0 +1,176 @@
+{
+  "goals": [
+    "Expose `POST /generate/image` that accepts a text prompt and returns a `job_id` instantly (HTTP 202).",
+    "Expose `GET /jobs/{job_id}` that returns job status and, when done, a base64-encoded PNG.",
+    "Expose `GET /health` that reports pipeline readiness (ok / loading / degraded).",
+    "Handle errors and timeouts gracefully — no unhandled 500 crashes.",
+    "Refactor `services/media` from a flat `main.py` into a modular package layout ready for future media types."
+  ],
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Submit an image generation job",
+      "description": "As a backend agent (Mastra), I want to POST a text prompt and receive a `job_id` immediately so that I can continue executing while the image is being generated in the background.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-001-AC01",
+          "text": "`POST /generate/image` accepts JSON body `{ \"prompt\": \"<text>\" }`."
+        },
+        {
+          "id": "US-001-AC02",
+          "text": "Response is HTTP 202 with body `{ \"job_id\": \"<uuid>\" }`."
+        },
+        {
+          "id": "US-001-AC03",
+          "text": "The job is registered in the in-memory store with status `\"pending\"` before the response is returned."
+        },
+        {
+          "id": "US-001-AC04",
+          "text": "A background task is enqueued to run the comfy-diffusion Illustrious pipeline."
+        },
+        {
+          "id": "US-001-AC05",
+          "text": "Requests with missing or empty `prompt` return HTTP 422 (Pydantic validation error)."
+        },
+        {
+          "id": "US-001-AC06",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Poll job status and retrieve result",
+      "description": "As a backend agent, I want to GET the status of a submitted job so that I know when the image is ready and can retrieve it.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-002-AC01",
+          "text": "`GET /jobs/{job_id}` returns HTTP 200 with body:"
+        },
+        {
+          "id": "US-002-AC02",
+          "text": "Unknown `job_id` returns HTTP 404 with body `{ \"detail\": \"Job not found\" }`."
+        },
+        {
+          "id": "US-002-AC03",
+          "text": "`image_b64` is a valid base64-encoded PNG (decodable without error)."
+        },
+        {
+          "id": "US-002-AC04",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Health endpoint reports pipeline status",
+      "description": "As a developer or orchestrator, I want `GET /health` to report whether the comfy-diffusion pipeline loaded successfully so that dependent services can detect degraded state.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-003-AC01",
+          "text": "`GET /health` returns HTTP 200 with `{ \"status\": \"ok\", \"service\": \"media\", \"pipeline\": \"ready\" }` when the pipeline loaded successfully."
+        },
+        {
+          "id": "US-003-AC02",
+          "text": "Returns `{ \"status\": \"degraded\", \"service\": \"media\", \"pipeline\": \"unavailable\", \"error\": \"<message>\" }` when the pipeline failed to load."
+        },
+        {
+          "id": "US-003-AC03",
+          "text": "Returns `{ \"status\": \"loading\", \"service\": \"media\", \"pipeline\": \"loading\" }` while the pipeline is still initialising on startup."
+        },
+        {
+          "id": "US-003-AC04",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Graceful error and timeout handling",
+      "description": "As a backend agent, I want failed or timed-out jobs to return a structured error response so that I can surface a meaningful message instead of crashing.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-004-AC01",
+          "text": "If the pipeline raises any exception during generation, the job transitions to `\"failed\"` with `error` set to the exception message."
+        },
+        {
+          "id": "US-004-AC02",
+          "text": "If generation exceeds 120 seconds, the job transitions to `\"failed\"` with `error: \"generation timed out\"`."
+        },
+        {
+          "id": "US-004-AC03",
+          "text": "No generation failure causes an unhandled HTTP 500 on any endpoint."
+        },
+        {
+          "id": "US-004-AC04",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Modular package refactor",
+      "description": "As a developer, I want `services/media` refactored into the module structure above so that future media types (video, audio) can be added without touching unrelated code.",
+      "acceptanceCriteria": [
+        {
+          "id": "US-005-AC01",
+          "text": "`main.py` is kept thin: imports routers and registers the lifespan startup event only."
+        },
+        {
+          "id": "US-005-AC02",
+          "text": "Each sub-module (`routers/`, `jobs/`, `pipelines/`, `schemas/`) contains only its own responsibility."
+        },
+        {
+          "id": "US-005-AC03",
+          "text": "All existing tests from It.01 (`tests/test_main.py`) continue to pass unchanged."
+        },
+        {
+          "id": "US-005-AC04",
+          "text": "Typecheck / lint passes."
+        }
+      ]
+    }
+  ],
+  "functionalRequirements": [
+    {
+      "id": "FR-1",
+      "description": "** `POST /generate/image` → HTTP 202 `{ job_id: string }`. Body: `{ prompt: string }` (required, non-empty)."
+    },
+    {
+      "id": "FR-2",
+      "description": "** `GET /jobs/{job_id}` → HTTP 200 `{ status, result, error }` or HTTP 404 `{ detail }`."
+    },
+    {
+      "id": "FR-3",
+      "description": "** Job statuses follow the lifecycle: `pending → running → done | failed`."
+    },
+    {
+      "id": "FR-4",
+      "description": "** Background worker runs the comfy-diffusion Illustrious pipeline and updates job store atomically."
+    },
+    {
+      "id": "FR-5",
+      "description": "** Generation timeout is 120 seconds; exceeded jobs move to `failed`."
+    },
+    {
+      "id": "FR-6",
+      "description": "** `GET /health` returns one of `ok`, `loading`, or `degraded` with `pipeline` field."
+    },
+    {
+      "id": "FR-7",
+      "description": "** All Pydantic models live in `schemas/generate.py`; no inline `dict` return types for structured responses."
+    },
+    {
+      "id": "FR-8",
+      "description": "** In-memory job store in `jobs/store.py` uses `threading.Lock` (not `asyncio.Lock`) — FastAPI `BackgroundTasks` executes in a threadpool, not in the async event loop, so only OS-level locks are safe here."
+    },
+    {
+      "id": "FR-9",
+      "description": "** The pipeline is implemented as a class (or callable) with a clear interface and registered on `app.state` during the FastAPI lifespan — never imported directly inside the worker. The worker receives the pipeline instance via `app.state`, making it trivially replaceable with a mock in tests without monkeypatching imports."
+    },
+    {
+      "id": "FR-11",
+      "description": "** Pytest tests cover all three endpoints with the pipeline mocked; at least one integration test documents the real end-to-end flow."
+    }
+  ]
+}
