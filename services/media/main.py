@@ -22,6 +22,7 @@ if not logger.handlers:
 logger.propagate = False
 
 comfy_diffusion_import_error: str | None = None
+comfy_diffusion_pipeline_status = "loading"
 image_jobs: dict[str, dict[str, Any]] = {}
 DEFAULT_PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -67,15 +68,28 @@ def run_comfy_diffusion_smoke_test(
 @app.on_event("startup")
 def startup() -> None:
     global comfy_diffusion_import_error
+    global comfy_diffusion_pipeline_status
+    comfy_diffusion_pipeline_status = "loading"
     comfy_diffusion_import_error = run_comfy_diffusion_smoke_test()
+    comfy_diffusion_pipeline_status = (
+        "ready" if comfy_diffusion_import_error is None else "unavailable"
+    )
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    if comfy_diffusion_import_error is not None:
-        return {"status": "degraded", "error": comfy_diffusion_import_error}
+    if comfy_diffusion_pipeline_status == "loading":
+        return {"status": "loading", "service": "media", "pipeline": "loading"}
 
-    return {"status": "ok", "service": "media"}
+    if comfy_diffusion_import_error is not None:
+        return {
+            "status": "degraded",
+            "service": "media",
+            "pipeline": "unavailable",
+            "error": comfy_diffusion_import_error,
+        }
+
+    return {"status": "ok", "service": "media", "pipeline": "ready"}
 
 
 def run_comfy_diffusion_illustrious_pipeline(prompt: str) -> dict[str, str]:

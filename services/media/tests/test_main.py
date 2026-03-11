@@ -22,6 +22,7 @@ PACKAGE_JSON_PATH = MEDIA_DIR / "package.json"
 @pytest.fixture(autouse=True)
 def reset_comfy_diffusion_state() -> None:
     main.comfy_diffusion_import_error = None
+    main.comfy_diffusion_pipeline_status = "loading"
 
 
 def get_free_port() -> int:
@@ -78,7 +79,7 @@ def test_us_004_ac03_health_returns_expected_payload() -> None:
 
     try:
         payload = wait_for_health(port)
-        assert payload == {"status": "ok", "service": "media"}
+        assert payload == {"status": "ok", "service": "media", "pipeline": "ready"}
     finally:
         process.terminate()
         process.wait(timeout=10)
@@ -148,6 +149,8 @@ def test_us_005_ac02_health_is_degraded_when_import_fails(monkeypatch) -> None:
 
     assert main.health() == {
         "status": "degraded",
+        "service": "media",
+        "pipeline": "unavailable",
         "error": "No module named 'comfy_diffusion'",
     }
 
