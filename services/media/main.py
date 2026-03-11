@@ -6,6 +6,8 @@ import os
 import sys
 from base64 import b64encode
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 from uuid import uuid4
 
@@ -24,6 +26,7 @@ logger.propagate = False
 comfy_diffusion_import_error: str | None = None
 comfy_diffusion_pipeline_status = "loading"
 image_jobs: dict[str, dict[str, Any]] = {}
+GENERATION_TIMEOUT_SECONDS = 120
 DEFAULT_PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
     b"\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02\x00\x00\x00\x0bIDATx\xdac\xfc"
@@ -100,10 +103,33 @@ def run_comfy_diffusion_illustrious_pipeline(prompt: str) -> dict[str, str]:
     return {"image_b64": b64encode(DEFAULT_PNG_BYTES).decode("ascii")}
 
 
+def run_generation_with_timeout(
+    prompt: str,
+    timeout_seconds: float | None = None,
+) -> dict[str, str]:
+    effective_timeout = (
+        GENERATION_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+    )
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(run_comfy_diffusion_illustrious_pipeline, prompt)
+    try:
+        return future.result(timeout=effective_timeout)
+    except FutureTimeoutError as error:
+        future.cancel()
+        raise TimeoutError("generation timed out") from error
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def process_image_job(job_id: str, prompt: str) -> None:
     image_jobs[job_id]["status"] = "running"
     try:
-        result = run_comfy_diffusion_illustrious_pipeline(prompt)
+        result = run_generation_with_timeout(prompt)
+    except TimeoutError as error:
+        image_jobs[job_id]["status"] = "failed"
+        image_jobs[job_id]["error"] = str(error)
+        logger.exception("Image generation timed out for job_id=%s", job_id)
+        return
     except Exception as error:
         image_jobs[job_id]["status"] = "failed"
         image_jobs[job_id]["error"] = str(error)
