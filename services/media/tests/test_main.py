@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import socket
@@ -9,11 +10,18 @@ import tomllib
 import urllib.request
 from pathlib import Path
 
-from main import resolve_port
+import pytest
+
+import main
 
 MEDIA_DIR = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = MEDIA_DIR / "pyproject.toml"
 PACKAGE_JSON_PATH = MEDIA_DIR / "package.json"
+
+
+@pytest.fixture(autouse=True)
+def reset_comfy_diffusion_state() -> None:
+    main.comfy_diffusion_import_error = None
 
 
 def get_free_port() -> int:
@@ -101,8 +109,8 @@ def test_us_004_ac04_service_starts_with_equivalent_uv_command() -> None:
 
 
 def test_us_004_ac05_default_port_is_8000_and_port_is_configurable() -> None:
-    assert resolve_port(None) == 8000
-    assert resolve_port("8123") == 8123
+    assert main.resolve_port(None) == 8000
+    assert main.resolve_port("8123") == 8123
 
 
 def test_us_004_ac06_ruff_check_passes() -> None:
@@ -115,3 +123,52 @@ def test_us_004_ac06_ruff_check_passes() -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_us_005_ac01_startup_imports_comfy_diffusion_module_name() -> None:
+    imported_modules: list[str] = []
+
+    def fake_import(module_name: str) -> object:
+        imported_modules.append(module_name)
+        return object()
+
+    error = main.run_comfy_diffusion_smoke_test(importer=fake_import)
+
+    assert error is None
+    assert imported_modules == ["comfy_diffusion"]
+
+
+def test_us_005_ac02_health_is_degraded_when_import_fails(monkeypatch) -> None:
+    def fail_import(_: str) -> object:
+        raise ImportError("No module named 'comfy_diffusion'")
+
+    monkeypatch.setattr(main.importlib, "import_module", fail_import)
+
+    main.startup()
+
+    assert main.health() == {
+        "status": "degraded",
+        "error": "No module named 'comfy_diffusion'",
+    }
+
+
+def test_us_005_ac03_startup_logs_import_result_to_stdout(monkeypatch) -> None:
+    def fake_import(_: str) -> object:
+        return object()
+
+    monkeypatch.setattr(main.importlib, "import_module", fake_import)
+
+    stream_handler = next(
+        handler
+        for handler in main.logger.handlers
+        if isinstance(handler, main.logging.StreamHandler)
+    )
+
+    test_stream = io.StringIO()
+    original_stream = stream_handler.setStream(test_stream)
+    try:
+        main.startup()
+    finally:
+        stream_handler.setStream(original_stream)
+
+    assert "comfy_diffusion import smoke test passed" in test_stream.getvalue()
