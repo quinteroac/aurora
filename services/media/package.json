@@ -1,0 +1,7 @@
+{
+  "name": "@aurora/media",
+  "private": true,
+  "scripts": {
+    "lint": "ruff check ."
+  }
+}
