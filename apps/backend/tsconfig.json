@@ -1,7 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node", "bun-types"]
+    "types": ["node", "bun-types"],
+    "paths": {
+      "@aurora/shared-types/*": ["../../packages/shared-types/src/*"]
+    }
   },
   "include": ["src/**/*.ts"]
 }

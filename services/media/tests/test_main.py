@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import os
 import socket
@@ -9,11 +8,11 @@ import time
 import tomllib
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from main import app
-from pipelines.comfy_diffusion import run_comfy_diffusion_smoke_test
 
 MEDIA_DIR = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = MEDIA_DIR / "pyproject.toml"
@@ -122,57 +121,35 @@ def test_us_004_ac06_ruff_check_passes() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_us_005_ac01_startup_imports_comfy_diffusion_module_name() -> None:
-    imported_modules: list[str] = []
-
-    def fake_import(module_name: str) -> object:
-        imported_modules.append(module_name)
-        return object()
-
-    error = run_comfy_diffusion_smoke_test(importer=fake_import)
-
-    assert error is None
-    assert imported_modules == ["comfy_diffusion"]
+def test_us_005_ac01_startup_uses_check_runtime_and_sets_pipeline_when_ok() -> None:
+    with patch("comfy_diffusion.check_runtime", return_value={"status": "ok"}):
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/health")
+    assert resp.json() == {"status": "ok", "service": "media", "pipeline": "ready"}
+    assert app.state.pipeline is not None
+    assert app.state.pipeline_status == "ready"
 
 
-def test_us_005_ac02_health_is_degraded_when_import_fails() -> None:
-    def fail_import(_: str) -> object:
-        raise ImportError("No module named 'comfy_diffusion'")
-
-    error = run_comfy_diffusion_smoke_test(importer=fail_import)
-
-    with TestClient(app, raise_server_exceptions=True) as client:
-        # Override AFTER lifespan runs to simulate degraded state.
-        app.state.pipeline = None
-        app.state.pipeline_status = "unavailable"
-        app.state.pipeline_error = error
-
-        resp = client.get("/health")
-        assert resp.json() == {
-            "status": "degraded",
-            "service": "media",
-            "pipeline": "unavailable",
-            "error": "No module named 'comfy_diffusion'",
-        }
+def test_us_005_ac02_health_is_degraded_when_check_runtime_fails() -> None:
+    with patch(
+        "comfy_diffusion.check_runtime",
+        return_value={"error": "ComfyUI vendor not found", "comfyui_version": None},
+    ):
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/health")
+    assert resp.json() == {
+        "status": "degraded",
+        "service": "media",
+        "pipeline": "unavailable",
+        "error": "{'error': 'ComfyUI vendor not found', 'comfyui_version': None}",
+    }
+    assert app.state.pipeline is None
+    assert app.state.pipeline_status == "degraded"
 
 
-def test_us_005_ac03_startup_logs_import_result_to_stdout() -> None:
-    from pipelines.comfy_diffusion import logger
-
-    def fake_import(_: str) -> object:
-        return object()
-
-    stream_handler = next(
-        handler
-        for handler in logger.handlers
-        if isinstance(handler, __import__("logging").StreamHandler)
-    )
-
-    test_stream = io.StringIO()
-    original_stream = stream_handler.setStream(test_stream)
-    try:
-        run_comfy_diffusion_smoke_test(importer=fake_import)
-    finally:
-        stream_handler.setStream(original_stream)
-
-    assert "comfy_diffusion import smoke test passed" in test_stream.getvalue()
+def test_us_005_ac03_startup_calls_check_runtime_before_creating_pipeline() -> None:
+    with patch("comfy_diffusion.check_runtime") as mock_check:
+        mock_check.return_value = {"status": "ok"}
+        with TestClient(app, raise_server_exceptions=True) as client:
+            client.get("/health")
+    mock_check.assert_called_once()

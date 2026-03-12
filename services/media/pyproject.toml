@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0,<1.0.0",
   "uvicorn>=0.30.0,<1.0.0",
-  "comfy-diffusion",
+  "comfy-diffusion[comfyui]",
 ]
 
 [dependency-groups]
@@ -19,8 +19,19 @@ dev = [
 pythonpath = ["."]
 testpaths = ["tests"]
 
+[tool.uv]
+# When using an extra index (e.g. PyTorch cu128), uv by default only uses the first
+# index that has a package. PyTorch's index has requests==2.28.1, but comfy-diffusion
+# needs requests>=2.32.5. This strategy lets uv pick the best version across all indexes.
+index-strategy = "unsafe-best-match"
+
+[tool.uv.sources]
+# Use local comfy-diffusion clone with ComfyUI submodule so check_runtime() finds vendor/ComfyUI.
+comfy-diffusion = { path = "vendor/comfy-diffusion", editable = true }
+
 [tool.ruff]
 line-length = 100
+exclude = ["vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

@@ -11,14 +11,17 @@ export type NarratorOutput = {
   toolResults?: NarratorToolResult[];
 };
 
-export type RunNarrator = (message: string) => Promise<NarratorOutput>;
+export type NarratorInputMessage = { role: "user" | "assistant"; content: string };
+export type RunNarratorInput = string | NarratorInputMessage[];
+
+export type RunNarrator = (message: RunNarratorInput) => Promise<NarratorOutput>;
 
 export type NarratorStreamHandlers = {
   onToken: (token: string) => void;
-  onToolResult: (toolResult: NarratorToolResult) => void;
+  onToolResult: (toolResult: NarratorToolResult) => void | Promise<void>;
 };
 
-export type RunNarratorStream = (message: string, handlers: NarratorStreamHandlers) => Promise<void>;
+export type RunNarratorStream = (message: RunNarratorInput, handlers: NarratorStreamHandlers) => Promise<void>;
 
 const imageGenerationFailurePrefix = "Image generation failed:";
 
@@ -67,8 +70,10 @@ export const tokenizeNarration = (text: string): string[] => {
   return text.match(/\S+\s*/g) ?? [];
 };
 
+import type { NarratorFrame } from "@aurora/shared-types/ws-messages";
+
 export type WebsocketFrame =
-  | { type: "token"; content: string }
+  | NarratorFrame
   | { type: "image"; image_b64: string }
   | { type: "done" }
   | { type: "error"; message: string };

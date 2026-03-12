@@ -1,0 +1,3 @@
+[submodule "services/media/vendor/comfy-diffusion"]
+	path = services/media/vendor/comfy-diffusion
+	url = https://github.com/quinteroac/comfy-diffusion.git

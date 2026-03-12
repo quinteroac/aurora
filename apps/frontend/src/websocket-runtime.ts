@@ -1,0 +1,273 @@
+import type {
+  ChatModelAdapter,
+  ChatModelRunOptions,
+  ChatModelRunResult,
+  ThreadAssistantMessagePart,
+  ThreadMessage,
+} from "@assistant-ui/react";
+import type { NarratorFrame } from "@aurora/shared-types/ws-messages";
+
+type StreamNarratorResponseDeps = {
+  getSocket?: () => WebSocket;
+  abortSignal?: AbortSignal;
+  onSceneImage?: (imageSrc: string) => void;
+};
+
+const BACKEND_URL_FALLBACK = "http://localhost:3000";
+
+const resolveBackendWsUrlFromEnv = (): string | null => {
+  const configuredWsUrl = (import.meta as ImportMeta & {
+    env?: { VITE_BACKEND_WS_URL?: string };
+  }).env?.VITE_BACKEND_WS_URL;
+
+  if (!configuredWsUrl) {
+    return null;
+  }
+
+  const trimmed = configuredWsUrl.trim();
+
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  return trimmed;
+};
+
+const resolveBackendHttpUrl = (): string => {
+  const configuredUrl = (import.meta as ImportMeta & { env?: { VITE_BACKEND_URL?: string } }).env
+    ?.VITE_BACKEND_URL;
+
+  return configuredUrl && configuredUrl.trim().length > 0
+    ? configuredUrl.trim()
+    : BACKEND_URL_FALLBACK;
+};
+
+export const resolveBackendWsUrl = (): string => {
+  const explicitWsUrl = resolveBackendWsUrlFromEnv();
+
+  if (explicitWsUrl) {
+    return explicitWsUrl;
+  }
+
+  const backendUrl = new URL(resolveBackendHttpUrl());
+  const wsProtocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
+
+  return `${wsProtocol}//${backendUrl.host}/ws`;
+};
+
+const isNarratorFrame = (payload: unknown): payload is NarratorFrame => {
+  if (typeof payload !== "object" || payload === null) {
+    return false;
+  }
+
+  const candidate = payload as {
+    type?: unknown;
+    content?: unknown;
+    url?: unknown;
+    image_b64?: unknown;
+  };
+
+  if (candidate.type === "token") {
+    return typeof candidate.content === "string";
+  }
+
+  if (candidate.type === "scene_image") {
+    return (
+      typeof candidate.url === "string" || typeof candidate.image_b64 === "string"
+    );
+  }
+
+  if (candidate.type === "done") {
+    return true;
+  }
+
+  return false;
+};
+
+/** Strip inline image data so it never goes to the narrator (avoids blowing LLM context). */
+const IMAGE_DATA_URL_REGEX = /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g;
+const IMAGE_OMITTED = "[Image omitted]";
+
+const stripImageDataFromText = (text: string): string =>
+  text.replace(IMAGE_DATA_URL_REGEX, IMAGE_OMITTED);
+
+const readLatestUserText = (messages: readonly ThreadMessage[]): string => {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "user") {
+      continue;
+    }
+
+    const raw = message.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("")
+      .trim();
+
+    if (raw.length > 0) {
+      return stripImageDataFromText(raw);
+    }
+  }
+
+  throw new Error("Cannot stream a response without a user message.");
+};
+
+const toTextContent = (text: string): ThreadAssistantMessagePart[] => {
+  return [
+    {
+      type: "text",
+      text,
+    },
+  ];
+};
+
+const toSceneImageSource = (frame: Extract<NarratorFrame, { type: "scene_image" }>): string => {
+  if (typeof frame.url === "string" && frame.url.trim().length > 0) {
+    return frame.url.trim();
+  }
+  if (typeof frame.image_b64 === "string" && frame.image_b64.length > 0) {
+    return `data:image/png;base64,${frame.image_b64}`;
+  }
+  return "";
+};
+
+const waitForSocketEvent = (
+  socket: WebSocket,
+  abortSignal?: AbortSignal
+): Promise<NarratorFrame> => {
+  return new Promise((resolve, reject) => {
+    const onMessage = (event: MessageEvent<string>) => {
+      cleanup();
+
+      try {
+        const decoded = JSON.parse(event.data) as unknown;
+        if (!isNarratorFrame(decoded)) {
+          reject(new Error("Received an unknown websocket frame."));
+          return;
+        }
+
+        resolve(decoded);
+      } catch {
+        reject(new Error("Received malformed websocket JSON."));
+      }
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("WebSocket connection failed."));
+    };
+
+    const onClose = () => {
+      cleanup();
+      reject(new Error("WebSocket connection closed before completion."));
+    };
+
+    const onAbort = () => {
+      cleanup();
+      reject(new Error("request aborted"));
+    };
+
+    const cleanup = () => {
+      socket.removeEventListener("message", onMessage as EventListener);
+      socket.removeEventListener("error", onError);
+      socket.removeEventListener("close", onClose);
+      abortSignal?.removeEventListener("abort", onAbort);
+    };
+
+    socket.addEventListener("message", onMessage as EventListener, { once: true });
+    socket.addEventListener("error", onError, { once: true });
+    socket.addEventListener("close", onClose, { once: true });
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+
+    if (abortSignal?.aborted) {
+      onAbort();
+    }
+  });
+};
+
+const waitForSocketOpen = (socket: WebSocket, abortSignal?: AbortSignal): Promise<void> => {
+  if (socket.readyState === WebSocket.OPEN) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const onOpen = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("WebSocket connection failed."));
+    };
+
+    const onAbort = () => {
+      cleanup();
+      reject(new Error("request aborted"));
+    };
+
+    const cleanup = () => {
+      socket.removeEventListener("open", onOpen);
+      socket.removeEventListener("error", onError);
+      abortSignal?.removeEventListener("abort", onAbort);
+    };
+
+    socket.addEventListener("open", onOpen, { once: true });
+    socket.addEventListener("error", onError, { once: true });
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+
+    if (abortSignal?.aborted) {
+      onAbort();
+    }
+  });
+};
+
+export const streamNarratorResponse = async function* (
+  message: string,
+  deps: StreamNarratorResponseDeps = {}
+): AsyncGenerator<string, void> {
+  const socket = deps.getSocket
+    ? deps.getSocket()
+    : new WebSocket(resolveBackendWsUrl());
+
+  await waitForSocketOpen(socket, deps.abortSignal);
+  socket.send(JSON.stringify({ message }));
+
+  let text = "";
+
+  while (true) {
+    const frame = await waitForSocketEvent(socket, deps.abortSignal);
+
+    if (frame.type === "token") {
+      text += frame.content;
+      yield text;
+      continue;
+    }
+
+    if (frame.type === "scene_image") {
+      deps.onSceneImage?.(toSceneImageSource(frame));
+      continue;
+    }
+
+    if (frame.type === "done") {
+      return;
+    }
+  }
+};
+
+export const createWebSocketChatModelAdapter = (
+  deps: Omit<StreamNarratorResponseDeps, "abortSignal"> = {}
+): ChatModelAdapter => ({
+  run: async function* (options: ChatModelRunOptions): AsyncGenerator<ChatModelRunResult, void> {
+    const userMessage = readLatestUserText(options.messages);
+
+    for await (const streamedText of streamNarratorResponse(userMessage, {
+      ...deps,
+      abortSignal: options.abortSignal,
+    })) {
+      yield {
+        content: toTextContent(streamedText),
+      };
+    }
+  },
+});

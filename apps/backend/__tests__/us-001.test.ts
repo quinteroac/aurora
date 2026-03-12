@@ -19,6 +19,7 @@ describe("US-001 - Monorepo workspace initialised", () => {
       "apps/backend",
       "apps/frontend",
       "services/media",
+      "packages/shared-types",
     ]);
   });
 

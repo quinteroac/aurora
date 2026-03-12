@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Load root .env so backend (and other services) receive OPENAI_API_KEY etc. when run via --cwd
+if [[ -f .env ]]; then
+  set -a
+  source .env
+  set +a
+fi
+
 pids=()
 
 cleanup() {
