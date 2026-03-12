@@ -15,3 +15,9 @@
 - Date: March 12, 2026
 - URL: `http://localhost:5173`
 - Result: placeholder renders on load, new image replaces placeholder with crossfade, and responsive layout is correct.
+
+# US-004 Visual Verification
+
+- Date: March 12, 2026
+- URL: `http://localhost:5173`
+- Result: DevTools offline toggles status from connected to disconnected, a reconnect notice banner appears, and a single reconnect attempt fires after ~3 seconds.

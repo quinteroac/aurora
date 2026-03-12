@@ -10,6 +10,7 @@ import {
 import { sendFirstPlayerMessage } from "./chat-api";
 import { submitUniverseSetting, type AppView } from "./onboarding-submit";
 import { createWebSocketChatModelAdapter } from "./websocket-runtime";
+import { useWebSocketConnectionStatus } from "./websocket-connection-status";
 import "./App.css";
 
 const SUBMISSION_ERROR_MESSAGE = "Unable to begin your adventure right now. Please try again.";
@@ -224,6 +225,7 @@ export const OnboardingScreen = ({
 };
 
 function App() {
+  const { status: websocketStatus, notice: websocketNotice } = useWebSocketConnectionStatus();
   const [view, setView] = useState<AppView>("onboarding");
   const [setting, setSetting] = useState("");
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
@@ -259,22 +261,37 @@ function App() {
     }
   };
 
-  if (view === "chat") {
-    return <ChatScreen firstPlayerMessage={firstPlayerMessage} />;
-  }
-
   return (
-    <OnboardingScreen
-      isSubmitting={isSubmitting}
-      onSubmit={onSubmit}
-      setting={setting}
-      setSetting={setSetting}
-      settingTextareaRef={settingTextareaRef}
-      validationMessage={validationMessage}
-      clearValidationMessage={() => {
-        setValidationMessage(null);
-      }}
-    />
+    <>
+      <div className="connection-status-overlay" aria-live="polite">
+        <p className="connection-status-badge" data-status={websocketStatus}>
+          <span className="connection-status-dot" aria-hidden="true" />
+          <span className="connection-status-text">
+            {websocketStatus === "connected" ? "Connected" : "Disconnected"}
+          </span>
+        </p>
+        {websocketNotice && (
+          <p className="connection-status-banner" role="status">
+            {websocketNotice}
+          </p>
+        )}
+      </div>
+      {view === "chat" ? (
+        <ChatScreen firstPlayerMessage={firstPlayerMessage} />
+      ) : (
+        <OnboardingScreen
+          isSubmitting={isSubmitting}
+          onSubmit={onSubmit}
+          setting={setting}
+          setSetting={setSetting}
+          settingTextareaRef={settingTextareaRef}
+          validationMessage={validationMessage}
+          clearValidationMessage={() => {
+            setValidationMessage(null);
+          }}
+        />
+      )}
+    </>
   );
 }
 

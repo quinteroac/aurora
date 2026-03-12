@@ -2,6 +2,54 @@
   min-height: 100vh;
 }
 
+.connection-status-overlay {
+  position: fixed;
+  top: 0.85rem;
+  right: 0.85rem;
+  z-index: 20;
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+}
+
+.connection-status-badge {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.34rem 0.58rem;
+  border-radius: 999px;
+  border: 1px solid rgb(110 135 167 / 45%);
+  background: rgb(6 15 27 / 88%);
+  color: #e5efff;
+  font-size: 0.83rem;
+  letter-spacing: 0.02em;
+}
+
+.connection-status-dot {
+  width: 0.58rem;
+  height: 0.58rem;
+  border-radius: 999px;
+  background: #ff6868;
+  box-shadow: 0 0 0 2px rgb(255 104 104 / 22%);
+}
+
+.connection-status-badge[data-status="connected"] .connection-status-dot {
+  background: #64f2a0;
+  box-shadow: 0 0 0 2px rgb(100 242 160 / 24%);
+}
+
+.connection-status-banner {
+  margin: 0;
+  max-width: min(24rem, 92vw);
+  border: 1px solid rgb(220 135 113 / 56%);
+  border-radius: 10px;
+  background: rgb(66 26 20 / 92%);
+  color: #ffe3de;
+  padding: 0.48rem 0.62rem;
+  font-size: 0.85rem;
+}
+
 .onboarding-screen,
 .chat-screen {
   min-height: 100vh;
