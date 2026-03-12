@@ -46,7 +46,65 @@ const ChatMessage = () => {
 };
 
 export const ChatScreen = ({ firstPlayerMessage }: ChatScreenProps) => {
-  const chatModel = useMemo(() => createWebSocketChatModelAdapter(), []);
+  const [sceneImageSrc, setSceneImageSrc] = useState<string | null>(null);
+  const [previousSceneImageSrc, setPreviousSceneImageSrc] = useState<string | null>(null);
+  const [isCrossfading, setIsCrossfading] = useState(false);
+  const [isCurrentImageVisible, setIsCurrentImageVisible] = useState(false);
+  const crossfadeTimeoutRef = useRef<number | null>(null);
+  const crossfadeFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (crossfadeTimeoutRef.current !== null) {
+        window.clearTimeout(crossfadeTimeoutRef.current);
+      }
+      if (crossfadeFrameRef.current !== null) {
+        window.cancelAnimationFrame(crossfadeFrameRef.current);
+      }
+    };
+  }, []);
+
+  const chatModel = useMemo(
+    () =>
+      createWebSocketChatModelAdapter({
+        onSceneImage: (nextImageSrc) => {
+          setSceneImageSrc((currentImageSrc) => {
+            if (currentImageSrc === nextImageSrc) {
+              return currentImageSrc;
+            }
+
+            if (!currentImageSrc) {
+              setPreviousSceneImageSrc(null);
+              setIsCrossfading(false);
+              setIsCurrentImageVisible(true);
+              return nextImageSrc;
+            }
+
+            setPreviousSceneImageSrc(currentImageSrc);
+            setIsCrossfading(true);
+            setIsCurrentImageVisible(false);
+            if (crossfadeTimeoutRef.current !== null) {
+              window.clearTimeout(crossfadeTimeoutRef.current);
+            }
+            if (crossfadeFrameRef.current !== null) {
+              window.cancelAnimationFrame(crossfadeFrameRef.current);
+            }
+            crossfadeFrameRef.current = window.requestAnimationFrame(() => {
+              setIsCurrentImageVisible(true);
+              crossfadeFrameRef.current = null;
+            });
+            crossfadeTimeoutRef.current = window.setTimeout(() => {
+              setPreviousSceneImageSrc(null);
+              setIsCrossfading(false);
+              crossfadeTimeoutRef.current = null;
+            }, 360);
+
+            return nextImageSrc;
+          });
+        },
+      }),
+    []
+  );
   const initialMessages = useMemo<readonly ThreadMessageLike[] | undefined>(() => {
     return firstPlayerMessage.length > 0
       ? [
@@ -87,6 +145,30 @@ export const ChatScreen = ({ firstPlayerMessage }: ChatScreenProps) => {
           </ThreadPrimitive.Root>
         </AssistantRuntimeProvider>
       </section>
+      <aside className="scene-image-panel" aria-label="Scene image panel">
+        <h2>Latest Scene</h2>
+        <div className="scene-image-viewport">
+          {!sceneImageSrc && <p className="scene-image-placeholder">Awaiting scene...</p>}
+          {previousSceneImageSrc && (
+            <img
+              src={previousSceneImageSrc}
+              alt="Previous generated scene"
+              className={`scene-image-layer scene-image-layer-previous${
+                isCrossfading && isCurrentImageVisible ? " is-hidden" : ""
+              }`}
+            />
+          )}
+          {sceneImageSrc && (
+            <img
+              src={sceneImageSrc}
+              alt="Latest generated scene"
+              className={`scene-image-layer scene-image-layer-current${
+                isCurrentImageVisible || !isCrossfading ? " is-visible" : ""
+              }`}
+            />
+          )}
+        </div>
+      </aside>
     </main>
   );
 };

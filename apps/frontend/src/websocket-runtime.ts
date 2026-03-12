@@ -25,7 +25,20 @@ type NarratorImageFrame = {
   image_b64: string;
 };
 
-type NarratorFrame = NarratorTokenFrame | NarratorDoneFrame | NarratorErrorFrame | NarratorImageFrame;
+type NarratorSceneImageFrame = {
+  type: "scene_image";
+  image_b64?: string;
+  image_url?: string;
+  url?: string;
+  image?: string;
+};
+
+type NarratorFrame =
+  | NarratorTokenFrame
+  | NarratorDoneFrame
+  | NarratorErrorFrame
+  | NarratorImageFrame
+  | NarratorSceneImageFrame;
 
 type WebSocketFactory = (url: string) => WebSocket;
 
@@ -33,6 +46,7 @@ type StreamNarratorResponseDeps = {
   createSocket?: WebSocketFactory;
   wsUrl?: string;
   abortSignal?: AbortSignal;
+  onSceneImage?: (imageSrc: string) => void;
 };
 
 const BACKEND_URL_FALLBACK = "http://localhost:3000";
@@ -58,14 +72,31 @@ const isNarratorFrame = (payload: unknown): payload is NarratorFrame => {
     return false;
   }
 
-  const candidate = payload as { type?: unknown; content?: unknown; message?: unknown };
+  const candidate = payload as {
+    type?: unknown;
+    content?: unknown;
+    message?: unknown;
+    image_b64?: unknown;
+    image_url?: unknown;
+    url?: unknown;
+    image?: unknown;
+  };
 
   if (candidate.type === "done") {
     return true;
   }
 
   if (candidate.type === "image") {
-    return true;
+    return typeof candidate.image_b64 === "string";
+  }
+
+  if (candidate.type === "scene_image") {
+    return (
+      typeof candidate.image_b64 === "string" ||
+      typeof candidate.image_url === "string" ||
+      typeof candidate.url === "string" ||
+      typeof candidate.image === "string"
+    );
   }
 
   if (candidate.type === "token") {
@@ -107,6 +138,20 @@ const toTextContent = (text: string): ThreadAssistantMessagePart[] => {
       text,
     },
   ];
+};
+
+const toSceneImageSource = (frame: NarratorImageFrame | NarratorSceneImageFrame): string => {
+  const rawImage =
+    frame.type === "image"
+      ? frame.image_b64
+      : frame.image_url ?? frame.url ?? frame.image_b64 ?? frame.image ?? "";
+  const image = rawImage.trim();
+
+  if (image.startsWith("http://") || image.startsWith("https://") || image.startsWith("data:")) {
+    return image;
+  }
+
+  return `data:image/png;base64,${image}`;
 };
 
 const waitForSocketEvent = (
@@ -223,6 +268,12 @@ export const streamNarratorResponse = async function* (
       }
 
       if (frame.type === "image") {
+        deps.onSceneImage?.(toSceneImageSource(frame));
+        continue;
+      }
+
+      if (frame.type === "scene_image") {
+        deps.onSceneImage?.(toSceneImageSource(frame));
         continue;
       }
 
