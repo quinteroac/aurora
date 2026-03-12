@@ -23,6 +23,18 @@ const postChat = async (
 };
 
 describe("US-005 integration: chat endpoint", () => {
+  test("US-005-AC02: missing or empty message returns HTTP 400", async () => {
+    const runNarrator: RunNarrator = async () => ({ text: "unused", toolResults: [] });
+
+    const missing = await postChat(runNarrator, {});
+    expect(missing.status).toBe(400);
+    expect(missing.json).toEqual({ error: "message is required" });
+
+    const empty = await postChat(runNarrator, { message: "   " });
+    expect(empty.status).toBe(400);
+    expect(empty.json).toEqual({ error: "message is required" });
+  });
+
   test("US-005-AC02: returns HTTP 200 with narrative response and generated images", async () => {
     const runNarrator: RunNarrator = async () => ({
       text: "The aurora bridge arches over the obsidian sea.",

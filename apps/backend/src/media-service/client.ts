@@ -12,9 +12,16 @@ export type MediaServiceJobStatus = {
   error: string | null;
 };
 
+/** Result of polling a job; matches PRD pollJob return shape. */
+export type PollJobResult = {
+  status: string;
+  result?: { image_b64: string };
+  error?: string;
+};
+
 export interface MediaServiceClient {
-  createImageJob(prompt: string): Promise<string>;
-  getJobStatus(jobId: string): Promise<MediaServiceJobStatus>;
+  submitJob(prompt: string): Promise<{ job_id: string }>;
+  pollJob(jobId: string): Promise<PollJobResult>;
 }
 
 export type HttpFetcher = (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>;
@@ -44,7 +51,7 @@ export class HttpMediaServiceClient implements MediaServiceClient {
     private readonly fetcher: HttpFetcher = fetch
   ) {}
 
-  async createImageJob(prompt: string): Promise<string> {
+  async submitJob(prompt: string): Promise<{ job_id: string }> {
     const response = await this.fetcher(`${this.baseUrl}/generate/image`, {
       method: "POST",
       headers: {
@@ -62,10 +69,10 @@ export class HttpMediaServiceClient implements MediaServiceClient {
       throw new Error("Media Service image job creation failed: missing job_id");
     }
 
-    return payload.job_id;
+    return { job_id: payload.job_id };
   }
 
-  async getJobStatus(jobId: string): Promise<MediaServiceJobStatus> {
+  async pollJob(jobId: string): Promise<PollJobResult> {
     const response = await this.fetcher(`${this.baseUrl}/jobs/${jobId}`, {
       method: "GET",
       headers: {
@@ -77,6 +84,11 @@ export class HttpMediaServiceClient implements MediaServiceClient {
       throw new Error(`Media Service job status check failed with HTTP ${response.status}`);
     }
 
-    return readJsonResponse<MediaServiceJobStatus>(response);
+    const data = await readJsonResponse<MediaServiceJobStatus>(response);
+    return {
+      status: data.status,
+      ...(data.result != null && { result: data.result }),
+      ...(data.error != null && { error: data.error }),
+    };
   }
 }

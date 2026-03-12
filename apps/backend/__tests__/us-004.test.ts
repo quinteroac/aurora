@@ -156,7 +156,7 @@ describe("US-004 - WebSocket /ws streaming endpoint", () => {
 
       expect(imageFrame).toEqual({
         type: "image",
-        content: "base64-image-data",
+        image_b64: "base64-image-data",
       });
       expect(doneFrame).toEqual({ type: "done" });
     } finally {

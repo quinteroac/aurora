@@ -25,16 +25,16 @@ describe("US-005 integration: generate_image tool flow", () => {
 
     let polls = 0;
     const client: MediaServiceClient = {
-      createImageJob: async () => "job-123",
-      getJobStatus: async () => {
+      submitJob: async () => ({ job_id: "job-123" }),
+      pollJob: async () => {
         polls += 1;
         if (polls < 3) {
-          return { status: "running", result: null, error: null };
+          return { status: "running", result: undefined, error: undefined };
         }
         return {
           status: "done",
           result: { image_b64: "final-image-b64" },
-          error: null,
+          error: undefined,
         };
       },
     };
@@ -45,6 +45,64 @@ describe("US-005 integration: generate_image tool flow", () => {
 
       expect(polls).toBe(3);
       expect(result).toBe("final-image-b64");
+    } finally {
+      restoreEnv("GENERATE_IMAGE_POLL_INTERVAL_MS", previousInterval);
+      restoreEnv("GENERATE_IMAGE_POLL_TIMEOUT_MS", previousTimeout);
+    }
+  });
+
+  test("US-005-AC04: failed status returns structured error string", async () => {
+    const previousInterval = process.env.GENERATE_IMAGE_POLL_INTERVAL_MS;
+    const previousTimeout = process.env.GENERATE_IMAGE_POLL_TIMEOUT_MS;
+    process.env.GENERATE_IMAGE_POLL_INTERVAL_MS = "1";
+    process.env.GENERATE_IMAGE_POLL_TIMEOUT_MS = "50";
+
+    const client: MediaServiceClient = {
+      submitJob: async () => ({ job_id: "job-fail" }),
+      pollJob: async () => ({
+        status: "failed",
+        result: undefined,
+        error: "pipeline_timeout",
+      }),
+    };
+
+    try {
+      const tool = createGenerateImageTool(client);
+      const result = await tool.execute?.({ prompt: "Desert monolith" }, undefined as never);
+
+      expect(result).toBe("Image generation failed: pipeline_timeout");
+    } finally {
+      restoreEnv("GENERATE_IMAGE_POLL_INTERVAL_MS", previousInterval);
+      restoreEnv("GENERATE_IMAGE_POLL_TIMEOUT_MS", previousTimeout);
+    }
+  });
+
+  test("US-005-AC04: timeout returns structured error", async () => {
+    const previousInterval = process.env.GENERATE_IMAGE_POLL_INTERVAL_MS;
+    const previousTimeout = process.env.GENERATE_IMAGE_POLL_TIMEOUT_MS;
+    process.env.GENERATE_IMAGE_POLL_INTERVAL_MS = "1";
+    process.env.GENERATE_IMAGE_POLL_TIMEOUT_MS = "30";
+
+    let polls = 0;
+    const client: MediaServiceClient = {
+      submitJob: async () => ({ job_id: "job-timeout" }),
+      pollJob: async () => {
+        polls += 1;
+        return {
+          status: "running",
+          result: undefined,
+          error: undefined,
+        };
+      },
+    };
+
+    try {
+      const tool = createGenerateImageTool(client);
+      const result = await tool.execute?.({ prompt: "Singing marsh" }, undefined as never);
+
+      expect(result?.startsWith("Image generation failed: ")).toBe(true);
+      expect(result).toContain("timed out");
+      expect(polls).toBeGreaterThan(0);
     } finally {
       restoreEnv("GENERATE_IMAGE_POLL_INTERVAL_MS", previousInterval);
       restoreEnv("GENERATE_IMAGE_POLL_TIMEOUT_MS", previousTimeout);

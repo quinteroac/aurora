@@ -72,7 +72,7 @@ describe("US-002 - generate_image tool wired to Media Service", () => {
       const baseUrl = resolveMediaServiceBaseUrl();
       const client = new HttpMediaServiceClient(baseUrl);
 
-      await client.createImageJob("Vast floating citadel");
+      await client.submitJob("Vast floating citadel");
 
       expect(fetchCalls.length).toBe(1);
       expect(fetchCalls[0]).toEqual({
@@ -96,14 +96,14 @@ describe("US-002 - generate_image tool wired to Media Service", () => {
 
     let polls = 0;
     const client: MediaServiceClient = {
-      createImageJob: async () => "job-456",
-      getJobStatus: async () => {
+      submitJob: async () => ({ job_id: "job-456" }),
+      pollJob: async () => {
         polls += 1;
         if (polls < 3) {
           return {
             status: "running",
-            result: null,
-            error: null,
+            result: undefined,
+            error: undefined,
           };
         }
 
@@ -112,7 +112,7 @@ describe("US-002 - generate_image tool wired to Media Service", () => {
           result: {
             image_b64: "base64-image",
           },
-          error: null,
+          error: undefined,
         };
       },
     };
@@ -137,13 +137,13 @@ describe("US-002 - generate_image tool wired to Media Service", () => {
     process.env.GENERATE_IMAGE_POLL_TIMEOUT_MS = "20";
 
     const client: MediaServiceClient = {
-      createImageJob: async () => "job-done",
-      getJobStatus: async () => ({
+      submitJob: async () => ({ job_id: "job-done" }),
+      pollJob: async () => ({
         status: "done",
         result: {
           image_b64: "encoded-png",
         },
-        error: null,
+        error: undefined,
       }),
     };
 
@@ -159,10 +159,10 @@ describe("US-002 - generate_image tool wired to Media Service", () => {
     process.env.GENERATE_IMAGE_POLL_TIMEOUT_MS = "20";
 
     const client: MediaServiceClient = {
-      createImageJob: async () => "job-fail",
-      getJobStatus: async () => ({
+      submitJob: async () => ({ job_id: "job-fail" }),
+      pollJob: async () => ({
         status: "failed",
-        result: null,
+        result: undefined,
         error: "pipeline_timeout",
       }),
     };
@@ -183,13 +183,13 @@ describe("US-002 - generate_image tool wired to Media Service", () => {
 
     let polls = 0;
     const client: MediaServiceClient = {
-      createImageJob: async () => "job-timeout",
-      getJobStatus: async () => {
+      submitJob: async () => ({ job_id: "job-timeout" }),
+      pollJob: async () => {
         polls += 1;
         return {
           status: "running",
-          result: null,
-          error: null,
+          result: undefined,
+          error: undefined,
         };
       },
     };
@@ -211,16 +211,16 @@ describe("US-002 - generate_image tool wired to Media Service", () => {
     let createdWithPrompt: string | null = null;
 
     const client: MediaServiceClient = {
-      createImageJob: async (prompt) => {
+      submitJob: async (prompt) => {
         createdWithPrompt = prompt;
-        return "job-factory";
+        return { job_id: "job-factory" };
       },
-      getJobStatus: async () => ({
+      pollJob: async () => ({
         status: "done",
         result: {
           image_b64: "factory-image",
         },
-        error: null,
+        error: undefined,
       }),
     };
 

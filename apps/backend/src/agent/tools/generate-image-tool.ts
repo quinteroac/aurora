@@ -1,5 +1,5 @@
 import { createTool } from "@mastra/core/tools";
-import type { MediaServiceClient, MediaServiceJobStatus } from "../../media-service/client";
+import type { MediaServiceClient, PollJobResult } from "../../media-service/client";
 
 export const defaultGenerateImagePollIntervalMs = 2_000;
 export const defaultGenerateImagePollTimeoutMs = 120_000;
@@ -46,7 +46,7 @@ const resolvePollingConfig = (env = process.env) => {
   };
 };
 
-const readDoneResult = (jobStatus: MediaServiceJobStatus): string | null => {
+const readDoneResult = (jobStatus: PollJobResult): string | null => {
   return jobStatus.result?.image_b64 ?? null;
 };
 
@@ -62,10 +62,10 @@ export const createGenerateImageTool = (client: MediaServiceClient) =>
       const { prompt } = inputData;
       const { pollIntervalMs, timeoutMs } = resolvePollingConfig();
       const deadline = Date.now() + timeoutMs;
-      const jobId = await client.createImageJob(prompt);
+      const { job_id: jobId } = await client.submitJob(prompt);
 
       while (Date.now() <= deadline) {
-        const jobStatus = await client.getJobStatus(jobId);
+        const jobStatus = await client.pollJob(jobId);
 
         if (jobStatus.status === "done") {
           const imageB64 = readDoneResult(jobStatus);

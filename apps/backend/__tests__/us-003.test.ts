@@ -127,12 +127,12 @@ describe("US-003 - POST /chat REST endpoint", () => {
     });
   });
 
-  test("US-003-AC06: agent errors (including tool failures) return HTTP 500", async () => {
+  test("US-003-AC06: agent errors (including tool failures) return HTTP 500 with error message", async () => {
     const agentFailure = await postChat(async () => Promise.reject(new Error("llm provider down")), {
       message: "Continue the story.",
     });
     expect(agentFailure.status).toBe(500);
-    expect(agentFailure.json).toEqual({ error: "agent invocation failed" });
+    expect(agentFailure.json).toEqual({ error: "llm provider down" });
 
     const toolFailure = await postChat(
       async () => ({
@@ -149,7 +149,7 @@ describe("US-003 - POST /chat REST endpoint", () => {
       { message: "Render the battlefield." }
     );
     expect(toolFailure.status).toBe(500);
-    expect(toolFailure.json).toEqual({ error: "agent invocation failed" });
+    expect(toolFailure.json).toEqual({ error: "Image generation failed: pipeline_timeout" });
   });
 
   test("US-003-AC07: typecheck / lint passes", () => {
