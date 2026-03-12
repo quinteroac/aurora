@@ -1,104 +1,158 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { resolveFrontendPort } from "../../frontend/vite.config";
+import { createApp, type RunNarrator } from "../src/index";
 
 const repoRoot = path.resolve(import.meta.dir, "../../..");
-const frontendDir = path.resolve(repoRoot, "apps/frontend");
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const postChat = async (
+  runNarrator: RunNarrator,
+  body: unknown
+): Promise<{ status: number; json: unknown }> => {
+  const app = createApp({ runNarrator });
+  const response = await app.handle(
+    new Request("http://localhost/chat", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    })
+  );
 
-const waitForPage = async (port: number, timeoutMs = 15_000): Promise<string> => {
-  const start = Date.now();
-  const url = `http://127.0.0.1:${port}`;
-
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        return response.text();
-      }
-    } catch {
-      // Dev server has not started yet.
-    }
-
-    await wait(150);
-  }
-
-  throw new Error(`Timed out waiting for ${url}`);
+  return {
+    status: response.status,
+    json: await response.json(),
+  };
 };
 
-describe("US-003 - Frontend service scaffolded and reachable", () => {
-  test("US-003-AC01: apps/frontend is scaffolded with Vite + React + TypeScript", () => {
-    const frontendPackageJson = JSON.parse(
-      readFileSync(path.join(frontendDir, "package.json"), "utf8")
-    ) as {
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-      scripts?: Record<string, string>;
+describe("US-003 - POST /chat REST endpoint", () => {
+  test("US-003-AC01: POST /chat accepts JSON body { message }", async () => {
+    const calls: string[] = [];
+    const runNarrator: RunNarrator = async (message) => {
+      calls.push(message);
+      return {
+        text: "Narrative turn complete",
+        toolResults: [],
+      };
     };
 
-    expect(frontendPackageJson.dependencies?.react).toBeDefined();
-    expect(frontendPackageJson.dependencies?.["react-dom"]).toBeDefined();
-    expect(frontendPackageJson.devDependencies?.vite).toBeDefined();
-    expect(frontendPackageJson.devDependencies?.["@vitejs/plugin-react"]).toBeDefined();
-    expect(frontendPackageJson.scripts?.dev).toBe("vite");
+    const result = await postChat(runNarrator, { message: "The wind carries whispers." });
 
-    expect(existsSync(path.join(frontendDir, "index.html"))).toBe(true);
-    expect(existsSync(path.join(frontendDir, "src/main.tsx"))).toBe(true);
-    expect(existsSync(path.join(frontendDir, "src/App.tsx"))).toBe(true);
+    expect(result.status).toBe(200);
+    expect(calls).toEqual(["The wind carries whispers."]);
   });
 
-  test("US-003-AC02: bun run dev starts Vite on port 5173 (configurable)", async () => {
-    expect(resolveFrontendPort(undefined)).toBe(5173);
-    expect(resolveFrontendPort("5211")).toBe(5211);
-
-    const port = "5211";
-    const childProcess = Bun.spawn({
-      cmd: ["bun", "run", "dev"],
-      cwd: frontendDir,
-      env: { ...process.env, FRONTEND_PORT: port },
-      stdout: "pipe",
-      stderr: "pipe",
+  test("US-003-AC02: successful response is HTTP 200 with { response, images }", async () => {
+    const runNarrator: RunNarrator = async () => ({
+      text: "Moonlight floods the ruined observatory.",
+      toolResults: [],
     });
 
-    try {
-      const page = await waitForPage(Number(port));
-      expect(page).toContain("<div id=\"root\"></div>");
-    } finally {
-      childProcess.kill();
-      await childProcess.exited;
-    }
+    const result = await postChat(runNarrator, { message: "Look around the observatory." });
+
+    expect(result.status).toBe(200);
+    expect(result.json).toEqual({
+      response: "Moonlight floods the ruined observatory.",
+      images: [],
+    });
   });
 
-  test("US-003-AC03: opening localhost renders default Vite/React placeholder page", async () => {
-    const port = "5212";
-    const childProcess = Bun.spawn({
-      cmd: ["bun", "run", "dev"],
-      cwd: frontendDir,
-      env: { ...process.env, FRONTEND_PORT: port },
-      stdout: "pipe",
-      stderr: "pipe",
+  test("US-003-AC03: missing or empty message returns HTTP 400", async () => {
+    const runNarrator: RunNarrator = async () => ({
+      text: "unused",
+      toolResults: [],
     });
 
-    try {
-      const page = await waitForPage(Number(port));
-      expect(page).toContain("<div id=\"root\"></div>");
-      expect(page).toContain("/src/main.tsx");
-    } finally {
-      childProcess.kill();
-      await childProcess.exited;
-    }
+    const missingMessage = await postChat(runNarrator, {});
+    expect(missingMessage.status).toBe(400);
+    expect(missingMessage.json).toEqual({ error: "message is required" });
 
-    const appSource = readFileSync(path.join(frontendDir, "src/App.tsx"), "utf8");
-    const mainSource = readFileSync(path.join(frontendDir, "src/main.tsx"), "utf8");
-
-    expect(appSource).toContain("Vite + React");
-    expect(appSource.includes("console.error")).toBe(false);
-    expect(mainSource.includes("console.error")).toBe(false);
+    const emptyMessage = await postChat(runNarrator, { message: "   " });
+    expect(emptyMessage.status).toBe(400);
+    expect(emptyMessage.json).toEqual({ error: "message is required" });
   });
 
-  test("US-003-AC04: typecheck and lint pass", () => {
+  test("US-003-AC04: endpoint calls narrator agent and awaits full response", async () => {
+    let resolved = false;
+    const runNarrator: RunNarrator = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      resolved = true;
+      return {
+        text: "A hidden vault unlocks beneath your feet.",
+        toolResults: [],
+      };
+    };
+
+    const result = await postChat(runNarrator, { message: "Search for secrets." });
+
+    expect(resolved).toBe(true);
+    expect(result.status).toBe(200);
+    expect(result.json).toEqual({
+      response: "A hidden vault unlocks beneath your feet.",
+      images: [],
+    });
+  });
+
+  test("US-003-AC05: image_b64 from generate_image is included in images", async () => {
+    const runNarrator: RunNarrator = async () => ({
+      text: "A painted memory materializes.",
+      toolResults: [
+        {
+          payload: {
+            toolName: "generate_image",
+            result: "b64-image-1",
+          },
+        },
+        {
+          payload: {
+            toolName: "other_tool",
+            result: "ignored",
+          },
+        },
+        {
+          payload: {
+            toolName: "generate_image",
+            result: "b64-image-2",
+          },
+        },
+      ],
+    });
+
+    const result = await postChat(runNarrator, { message: "Show me a vision." });
+
+    expect(result.status).toBe(200);
+    expect(result.json).toEqual({
+      response: "A painted memory materializes.",
+      images: ["b64-image-1", "b64-image-2"],
+    });
+  });
+
+  test("US-003-AC06: agent errors (including tool failures) return HTTP 500 with error message", async () => {
+    const agentFailure = await postChat(async () => Promise.reject(new Error("llm provider down")), {
+      message: "Continue the story.",
+    });
+    expect(agentFailure.status).toBe(500);
+    expect(agentFailure.json).toEqual({ error: "llm provider down" });
+
+    const toolFailure = await postChat(
+      async () => ({
+        text: "This should not be returned.",
+        toolResults: [
+          {
+            payload: {
+              toolName: "generate_image",
+              result: "Image generation failed: pipeline_timeout",
+            },
+          },
+        ],
+      }),
+      { message: "Render the battlefield." }
+    );
+    expect(toolFailure.status).toBe(500);
+    expect(toolFailure.json).toEqual({ error: "Image generation failed: pipeline_timeout" });
+  });
+
+  test("US-003-AC07: typecheck / lint passes", () => {
     const typecheck = Bun.spawnSync({
       cmd: ["bun", "run", "typecheck"],
       cwd: repoRoot,
@@ -114,15 +168,5 @@ describe("US-003 - Frontend service scaffolded and reachable", () => {
 
     expect(typecheck.exitCode).toBe(0);
     expect(lint.exitCode).toBe(0);
-  });
-
-  test("US-003-AC05: visual verification record exists for browser check", () => {
-    const verificationFile = path.join(frontendDir, "visual-verification.md");
-    const verification = readFileSync(verificationFile, "utf8");
-
-    expect(existsSync(verificationFile)).toBe(true);
-    expect(verification).toContain("March 11, 2026");
-    expect(verification).toContain("http://localhost:5173");
-    expect(verification).toContain("default Vite + React placeholder page renders");
   });
 });
