@@ -5,51 +5,33 @@ import type {
   ThreadAssistantMessagePart,
   ThreadMessage,
 } from "@assistant-ui/react";
-
-type NarratorTokenFrame = {
-  type: "token";
-  content: string;
-};
-
-type NarratorDoneFrame = {
-  type: "done";
-};
-
-type NarratorErrorFrame = {
-  type: "error";
-  message: string;
-};
-
-type NarratorImageFrame = {
-  type: "image";
-  image_b64: string;
-};
-
-type NarratorSceneImageFrame = {
-  type: "scene_image";
-  image_b64?: string;
-  image_url?: string;
-  url?: string;
-  image?: string;
-};
-
-type NarratorFrame =
-  | NarratorTokenFrame
-  | NarratorDoneFrame
-  | NarratorErrorFrame
-  | NarratorImageFrame
-  | NarratorSceneImageFrame;
-
-type WebSocketFactory = (url: string) => WebSocket;
+import type { NarratorFrame } from "@aurora/shared-types/ws-messages";
 
 type StreamNarratorResponseDeps = {
-  createSocket?: WebSocketFactory;
-  wsUrl?: string;
+  getSocket?: () => WebSocket;
   abortSignal?: AbortSignal;
   onSceneImage?: (imageSrc: string) => void;
 };
 
 const BACKEND_URL_FALLBACK = "http://localhost:3000";
+
+const resolveBackendWsUrlFromEnv = (): string | null => {
+  const configuredWsUrl = (import.meta as ImportMeta & {
+    env?: { VITE_BACKEND_WS_URL?: string };
+  }).env?.VITE_BACKEND_WS_URL;
+
+  if (!configuredWsUrl) {
+    return null;
+  }
+
+  const trimmed = configuredWsUrl.trim();
+
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  return trimmed;
+};
 
 const resolveBackendHttpUrl = (): string => {
   const configuredUrl = (import.meta as ImportMeta & { env?: { VITE_BACKEND_URL?: string } }).env
@@ -61,6 +43,12 @@ const resolveBackendHttpUrl = (): string => {
 };
 
 export const resolveBackendWsUrl = (): string => {
+  const explicitWsUrl = resolveBackendWsUrlFromEnv();
+
+  if (explicitWsUrl) {
+    return explicitWsUrl;
+  }
+
   const backendUrl = new URL(resolveBackendHttpUrl());
   const wsProtocol = backendUrl.protocol === "https:" ? "wss:" : "ws:";
 
@@ -75,40 +63,33 @@ const isNarratorFrame = (payload: unknown): payload is NarratorFrame => {
   const candidate = payload as {
     type?: unknown;
     content?: unknown;
-    message?: unknown;
-    image_b64?: unknown;
-    image_url?: unknown;
     url?: unknown;
-    image?: unknown;
+    image_b64?: unknown;
   };
-
-  if (candidate.type === "done") {
-    return true;
-  }
-
-  if (candidate.type === "image") {
-    return typeof candidate.image_b64 === "string";
-  }
-
-  if (candidate.type === "scene_image") {
-    return (
-      typeof candidate.image_b64 === "string" ||
-      typeof candidate.image_url === "string" ||
-      typeof candidate.url === "string" ||
-      typeof candidate.image === "string"
-    );
-  }
 
   if (candidate.type === "token") {
     return typeof candidate.content === "string";
   }
 
-  if (candidate.type === "error") {
-    return typeof candidate.message === "string";
+  if (candidate.type === "scene_image") {
+    return (
+      typeof candidate.url === "string" || typeof candidate.image_b64 === "string"
+    );
+  }
+
+  if (candidate.type === "done") {
+    return true;
   }
 
   return false;
 };
+
+/** Strip inline image data so it never goes to the narrator (avoids blowing LLM context). */
+const IMAGE_DATA_URL_REGEX = /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g;
+const IMAGE_OMITTED = "[Image omitted]";
+
+const stripImageDataFromText = (text: string): string =>
+  text.replace(IMAGE_DATA_URL_REGEX, IMAGE_OMITTED);
 
 const readLatestUserText = (messages: readonly ThreadMessage[]): string => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -117,14 +98,14 @@ const readLatestUserText = (messages: readonly ThreadMessage[]): string => {
       continue;
     }
 
-    const text = message.content
+    const raw = message.content
       .filter((part) => part.type === "text")
       .map((part) => part.text)
       .join("")
       .trim();
 
-    if (text.length > 0) {
-      return text;
+    if (raw.length > 0) {
+      return stripImageDataFromText(raw);
     }
   }
 
@@ -140,18 +121,14 @@ const toTextContent = (text: string): ThreadAssistantMessagePart[] => {
   ];
 };
 
-const toSceneImageSource = (frame: NarratorImageFrame | NarratorSceneImageFrame): string => {
-  const rawImage =
-    frame.type === "image"
-      ? frame.image_b64
-      : frame.image_url ?? frame.url ?? frame.image_b64 ?? frame.image ?? "";
-  const image = rawImage.trim();
-
-  if (image.startsWith("http://") || image.startsWith("https://") || image.startsWith("data:")) {
-    return image;
+const toSceneImageSource = (frame: Extract<NarratorFrame, { type: "scene_image" }>): string => {
+  if (typeof frame.url === "string" && frame.url.trim().length > 0) {
+    return frame.url.trim();
   }
-
-  return `data:image/png;base64,${image}`;
+  if (typeof frame.image_b64 === "string" && frame.image_b64.length > 0) {
+    return `data:image/png;base64,${frame.image_b64}`;
+  }
+  return "";
 };
 
 const waitForSocketEvent = (
@@ -249,62 +226,48 @@ export const streamNarratorResponse = async function* (
   message: string,
   deps: StreamNarratorResponseDeps = {}
 ): AsyncGenerator<string, void> {
-  const createSocket = deps.createSocket ?? ((url) => new WebSocket(url));
-  const socket = createSocket(deps.wsUrl ?? resolveBackendWsUrl());
+  const socket = deps.getSocket
+    ? deps.getSocket()
+    : new WebSocket(resolveBackendWsUrl());
 
   await waitForSocketOpen(socket, deps.abortSignal);
   socket.send(JSON.stringify({ message }));
 
   let text = "";
 
-  try {
-    while (true) {
-      const frame = await waitForSocketEvent(socket, deps.abortSignal);
+  while (true) {
+    const frame = await waitForSocketEvent(socket, deps.abortSignal);
 
-      if (frame.type === "token") {
-        text += frame.content;
-        yield text;
-        continue;
-      }
-
-      if (frame.type === "image") {
-        deps.onSceneImage?.(toSceneImageSource(frame));
-        continue;
-      }
-
-      if (frame.type === "scene_image") {
-        deps.onSceneImage?.(toSceneImageSource(frame));
-        continue;
-      }
-
-      if (frame.type === "error") {
-        throw new Error(frame.message);
-      }
-
-      return;
+    if (frame.type === "token") {
+      text += frame.content;
+      yield text;
+      continue;
     }
-  } finally {
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close();
+
+    if (frame.type === "scene_image") {
+      deps.onSceneImage?.(toSceneImageSource(frame));
+      continue;
+    }
+
+    if (frame.type === "done") {
+      return;
     }
   }
 };
 
 export const createWebSocketChatModelAdapter = (
   deps: Omit<StreamNarratorResponseDeps, "abortSignal"> = {}
-): ChatModelAdapter => {
-  return {
-    run: async function* (options: ChatModelRunOptions): AsyncGenerator<ChatModelRunResult, void> {
-      const userMessage = readLatestUserText(options.messages);
+): ChatModelAdapter => ({
+  run: async function* (options: ChatModelRunOptions): AsyncGenerator<ChatModelRunResult, void> {
+    const userMessage = readLatestUserText(options.messages);
 
-      for await (const streamedText of streamNarratorResponse(userMessage, {
-        ...deps,
-        abortSignal: options.abortSignal,
-      })) {
-        yield {
-          content: toTextContent(streamedText),
-        };
-      }
-    },
-  };
-};
+    for await (const streamedText of streamNarratorResponse(userMessage, {
+      ...deps,
+      abortSignal: options.abortSignal,
+    })) {
+      yield {
+        content: toTextContent(streamedText),
+      };
+    }
+  },
+});

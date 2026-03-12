@@ -1,12 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ChatModelRunOptions } from "@assistant-ui/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ChatScreen } from "../src/App";
+import { WebSocketRuntimeProvider } from "../src/websocket-runtime-provider";
 import { createWebSocketChatModelAdapter, streamNarratorResponse } from "../src/websocket-runtime";
 
-const repoRoot = path.resolve(import.meta.dir, "../../..");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "../../..");
 
 type Listener = (event: unknown) => void;
 
@@ -106,7 +109,19 @@ const createRunOptions = (messages: unknown): ChatModelRunOptions => {
 
 describe("US-002 - Streamed Narrative Chat", () => {
   test("US-002-AC01: assistant-ui chat component is mounted on chat app state", () => {
-    const markup = renderToStaticMarkup(<ChatScreen firstPlayerMessage="A drifting city" />);
+    const initialMessages = [
+      { role: "user" as const, content: [{ type: "text", text: "A drifting city" }] },
+    ];
+    const markup = renderToStaticMarkup(
+      <WebSocketRuntimeProvider initialMessages={initialMessages}>
+        <ChatScreen
+          sceneImageSrc={null}
+          previousSceneImageSrc={null}
+          isCrossfading={false}
+          isCurrentImageVisible={false}
+        />
+      </WebSocketRuntimeProvider>
+    );
 
     expect(markup).toContain('aria-label="Adventure chat view"');
     expect(markup).toContain('data-testid="assistant-chat-thread"');

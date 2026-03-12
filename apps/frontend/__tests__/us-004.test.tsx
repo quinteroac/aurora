@@ -1,11 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import App from "../src/App";
 import { createWebSocketConnectionStatusController } from "../src/websocket-connection-status";
 
-const repoRoot = path.resolve(import.meta.dir, "../../..");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "../../..");
 
 type Listener = (event: unknown) => void;
 

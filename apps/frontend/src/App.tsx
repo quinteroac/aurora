@@ -1,16 +1,14 @@
-import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, RefObject, useEffect, useRef, useState } from "react";
 import {
-  AssistantRuntimeProvider,
   ComposerPrimitive,
   MessagePrimitive,
   type ThreadMessageLike,
   ThreadPrimitive,
-  useLocalRuntime,
 } from "@assistant-ui/react";
 import { sendFirstPlayerMessage } from "./chat-api";
 import { submitUniverseSetting, type AppView } from "./onboarding-submit";
-import { createWebSocketChatModelAdapter } from "./websocket-runtime";
 import { useWebSocketConnectionStatus } from "./websocket-connection-status";
+import { WebSocketRuntimeProvider } from "./websocket-runtime-provider";
 import "./App.css";
 
 const SUBMISSION_ERROR_MESSAGE = "Unable to begin your adventure right now. Please try again.";
@@ -26,7 +24,10 @@ type OnboardingScreenProps = {
 };
 
 type ChatScreenProps = {
-  firstPlayerMessage: string;
+  sceneImageSrc: string | null;
+  previousSceneImageSrc: string | null;
+  isCrossfading: boolean;
+  isCurrentImageVisible: boolean;
 };
 
 const ChatMessage = () => {
@@ -46,105 +47,37 @@ const ChatMessage = () => {
   );
 };
 
-export const ChatScreen = ({ firstPlayerMessage }: ChatScreenProps) => {
-  const [sceneImageSrc, setSceneImageSrc] = useState<string | null>(null);
-  const [previousSceneImageSrc, setPreviousSceneImageSrc] = useState<string | null>(null);
-  const [isCrossfading, setIsCrossfading] = useState(false);
-  const [isCurrentImageVisible, setIsCurrentImageVisible] = useState(false);
-  const crossfadeTimeoutRef = useRef<number | null>(null);
-  const crossfadeFrameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (crossfadeTimeoutRef.current !== null) {
-        window.clearTimeout(crossfadeTimeoutRef.current);
-      }
-      if (crossfadeFrameRef.current !== null) {
-        window.cancelAnimationFrame(crossfadeFrameRef.current);
-      }
-    };
-  }, []);
-
-  const chatModel = useMemo(
-    () =>
-      createWebSocketChatModelAdapter({
-        onSceneImage: (nextImageSrc) => {
-          setSceneImageSrc((currentImageSrc) => {
-            if (currentImageSrc === nextImageSrc) {
-              return currentImageSrc;
-            }
-
-            if (!currentImageSrc) {
-              setPreviousSceneImageSrc(null);
-              setIsCrossfading(false);
-              setIsCurrentImageVisible(true);
-              return nextImageSrc;
-            }
-
-            setPreviousSceneImageSrc(currentImageSrc);
-            setIsCrossfading(true);
-            setIsCurrentImageVisible(false);
-            if (crossfadeTimeoutRef.current !== null) {
-              window.clearTimeout(crossfadeTimeoutRef.current);
-            }
-            if (crossfadeFrameRef.current !== null) {
-              window.cancelAnimationFrame(crossfadeFrameRef.current);
-            }
-            crossfadeFrameRef.current = window.requestAnimationFrame(() => {
-              setIsCurrentImageVisible(true);
-              crossfadeFrameRef.current = null;
-            });
-            crossfadeTimeoutRef.current = window.setTimeout(() => {
-              setPreviousSceneImageSrc(null);
-              setIsCrossfading(false);
-              crossfadeTimeoutRef.current = null;
-            }, 360);
-
-            return nextImageSrc;
-          });
-        },
-      }),
-    []
-  );
-  const initialMessages = useMemo<readonly ThreadMessageLike[] | undefined>(() => {
-    return firstPlayerMessage.length > 0
-      ? [
-          {
-            role: "user" as const,
-            content: [{ type: "text", text: firstPlayerMessage }],
-          },
-        ]
-      : undefined;
-  }, [firstPlayerMessage]);
-  const runtime = useLocalRuntime(chatModel, { initialMessages });
-
+export const ChatScreen = ({
+  sceneImageSrc,
+  previousSceneImageSrc,
+  isCrossfading,
+  isCurrentImageVisible,
+}: ChatScreenProps) => {
   return (
     <main className="chat-screen" aria-label="Adventure chat view">
       <section className="chat-panel">
         <h1>Adventure Chat</h1>
-        <AssistantRuntimeProvider runtime={runtime}>
-          <ThreadPrimitive.Root className="assistant-thread" data-testid="assistant-chat-thread">
-            <ThreadPrimitive.Viewport className="chat-viewport">
-              <ThreadPrimitive.Empty>
-                <p className="empty-chat-state">Start your adventure by describing your next move.</p>
-              </ThreadPrimitive.Empty>
-              <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-              <ThreadPrimitive.If running>
-                <p className="typing-indicator" role="status" aria-live="polite">
-                  Narrator is weaving the next scene...
-                </p>
-              </ThreadPrimitive.If>
-            </ThreadPrimitive.Viewport>
-            <ComposerPrimitive.Root className="chat-composer">
-              <ComposerPrimitive.Input
-                className="chat-composer-input"
-                placeholder="What do you do next?"
-                aria-label="Send a message to the narrator"
-              />
-              <ComposerPrimitive.Send className="chat-send-button">Send</ComposerPrimitive.Send>
-            </ComposerPrimitive.Root>
-          </ThreadPrimitive.Root>
-        </AssistantRuntimeProvider>
+        <ThreadPrimitive.Root className="assistant-thread" data-testid="assistant-chat-thread">
+          <ThreadPrimitive.Viewport className="chat-viewport">
+            <ThreadPrimitive.Empty>
+              <p className="empty-chat-state">Start your adventure by describing your next move.</p>
+            </ThreadPrimitive.Empty>
+            <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
+            <ThreadPrimitive.If running>
+              <p className="typing-indicator" role="status" aria-live="polite">
+                Narrator is weaving the next scene...
+              </p>
+            </ThreadPrimitive.If>
+          </ThreadPrimitive.Viewport>
+          <ComposerPrimitive.Root className="chat-composer">
+            <ComposerPrimitive.Input
+              className="chat-composer-input"
+              placeholder="What do you do next?"
+              aria-label="Send a message to the narrator"
+            />
+            <ComposerPrimitive.Send className="chat-send-button">Send</ComposerPrimitive.Send>
+          </ComposerPrimitive.Root>
+        </ThreadPrimitive.Root>
       </section>
       <aside className="scene-image-panel" aria-label="Scene image panel">
         <h2>Latest Scene</h2>
@@ -233,11 +166,75 @@ function App() {
   const [firstPlayerMessage, setFirstPlayerMessage] = useState<string>("");
   const settingTextareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const [sceneImageSrc, setSceneImageSrc] = useState<string | null>(null);
+  const [previousSceneImageSrc, setPreviousSceneImageSrc] = useState<string | null>(null);
+  const [isCrossfading, setIsCrossfading] = useState(false);
+  const [isCurrentImageVisible, setIsCurrentImageVisible] = useState(false);
+  const crossfadeTimeoutRef = useRef<number | null>(null);
+  const crossfadeFrameRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (view === "onboarding") {
       settingTextareaRef.current?.focus();
     }
   }, [view]);
+
+  useEffect(() => {
+    return () => {
+      if (crossfadeTimeoutRef.current !== null) {
+        window.clearTimeout(crossfadeTimeoutRef.current);
+      }
+      if (crossfadeFrameRef.current !== null) {
+        window.cancelAnimationFrame(crossfadeFrameRef.current);
+      }
+    };
+  }, []);
+
+  const onSceneImage = (nextImageSrc: string) => {
+    setSceneImageSrc((currentImageSrc) => {
+      if (currentImageSrc === nextImageSrc) {
+        return currentImageSrc;
+      }
+
+      if (!currentImageSrc) {
+        setPreviousSceneImageSrc(null);
+        setIsCrossfading(false);
+        setIsCurrentImageVisible(true);
+        return nextImageSrc;
+      }
+
+      setPreviousSceneImageSrc(currentImageSrc);
+      setIsCrossfading(true);
+      setIsCurrentImageVisible(false);
+      if (crossfadeTimeoutRef.current !== null) {
+        window.clearTimeout(crossfadeTimeoutRef.current);
+      }
+      if (crossfadeFrameRef.current !== null) {
+        window.cancelAnimationFrame(crossfadeFrameRef.current);
+      }
+      crossfadeFrameRef.current = window.requestAnimationFrame(() => {
+        setIsCurrentImageVisible(true);
+        crossfadeFrameRef.current = null;
+      });
+      crossfadeTimeoutRef.current = window.setTimeout(() => {
+        setPreviousSceneImageSrc(null);
+        setIsCrossfading(false);
+        crossfadeTimeoutRef.current = null;
+      }, 360);
+
+      return nextImageSrc;
+    });
+  };
+
+  const chatInitialMessages: readonly ThreadMessageLike[] =
+    firstPlayerMessage.length > 0
+      ? [
+          {
+            role: "user" as const,
+            content: [{ type: "text", text: firstPlayerMessage }],
+          },
+        ]
+      : [];
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -277,7 +274,17 @@ function App() {
         )}
       </div>
       {view === "chat" ? (
-        <ChatScreen firstPlayerMessage={firstPlayerMessage} />
+        <WebSocketRuntimeProvider
+          initialMessages={chatInitialMessages}
+          onSceneImage={onSceneImage}
+        >
+          <ChatScreen
+            sceneImageSrc={sceneImageSrc}
+            previousSceneImageSrc={previousSceneImageSrc}
+            isCrossfading={isCrossfading}
+            isCurrentImageVisible={isCurrentImageVisible}
+          />
+        </WebSocketRuntimeProvider>
       ) : (
         <OnboardingScreen
           isSubmitting={isSubmitting}

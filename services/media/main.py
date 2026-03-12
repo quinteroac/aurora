@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from config import resolve_port
-from pipelines.comfy_diffusion import run_comfy_diffusion_smoke_test
 from pipelines.image import IllustriousPipeline
 from routers.generate import router as generate_router
 from routers.health import router as health_router
@@ -16,14 +16,25 @@ async def lifespan(app: FastAPI):
     app.state.pipeline_status = "loading"
     app.state.pipeline_error = None
 
-    error = run_comfy_diffusion_smoke_test()
-    if error is None:
-        app.state.pipeline = IllustriousPipeline()
-        app.state.pipeline_status = "ready"
-    else:
+    # 1. Bootstrap ComfyUI path (check_runtime ensures vendor is on path)
+    from comfy_diffusion import check_runtime
+
+    runtime_info = check_runtime()
+    # check_runtime() returns dict with "error" key on failure; no "status" key on success
+    if runtime_info.get("error") is not None:
         app.state.pipeline = None
-        app.state.pipeline_status = "unavailable"
-        app.state.pipeline_error = error
+        app.state.pipeline_status = "degraded"
+        app.state.pipeline_error = str(runtime_info)
+    else:
+        # 2. Now safe to instantiate pipeline (ModelManager will use folder_paths)
+        try:
+            models_dir = os.environ.get("MODELS_DIR", "models")
+            app.state.pipeline = IllustriousPipeline(models_dir=models_dir)
+            app.state.pipeline_status = "ready"
+        except Exception as e:
+            app.state.pipeline = None
+            app.state.pipeline_status = "degraded"
+            app.state.pipeline_error = str(e)
 
     yield
 

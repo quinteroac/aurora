@@ -1,11 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ChatScreen } from "../src/App";
+import { WebSocketRuntimeProvider } from "../src/websocket-runtime-provider";
 import { streamNarratorResponse } from "../src/websocket-runtime";
 
-const repoRoot = path.resolve(import.meta.dir, "../../..");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "../../..");
 
 type Listener = (event: unknown) => void;
 
@@ -67,7 +70,22 @@ class FakeWebSocket {
 
 describe("US-003 - Scene Image Display", () => {
   test("US-003-AC01: chat screen renders a dedicated scene image panel beside the chat panel", () => {
-    const markup = renderToStaticMarkup(<ChatScreen firstPlayerMessage="Chart the obsidian coast" />);
+    const initialMessages = [
+      {
+        role: "user" as const,
+        content: [{ type: "text", text: "Chart the obsidian coast" }],
+      },
+    ];
+    const markup = renderToStaticMarkup(
+      <WebSocketRuntimeProvider initialMessages={initialMessages}>
+        <ChatScreen
+          sceneImageSrc={null}
+          previousSceneImageSrc={null}
+          isCrossfading={false}
+          isCurrentImageVisible={false}
+        />
+      </WebSocketRuntimeProvider>
+    );
 
     expect(markup).toContain('class="chat-panel"');
     expect(markup).toContain('class="scene-image-panel"');
@@ -116,7 +134,16 @@ describe("US-003 - Scene Image Display", () => {
   });
 
   test("US-003-AC03: placeholder renders with awaiting label and dark background styles", () => {
-    const markup = renderToStaticMarkup(<ChatScreen firstPlayerMessage="" />);
+    const markup = renderToStaticMarkup(
+      <WebSocketRuntimeProvider>
+        <ChatScreen
+          sceneImageSrc={null}
+          previousSceneImageSrc={null}
+          isCrossfading={false}
+          isCurrentImageVisible={false}
+        />
+      </WebSocketRuntimeProvider>
+    );
     const styles = readFileSync(path.join(repoRoot, "apps/frontend/src/App.css"), "utf8");
 
     expect(markup).toContain("Awaiting scene...");

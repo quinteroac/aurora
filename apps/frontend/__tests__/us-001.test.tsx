@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import App, { OnboardingScreen } from "../src/App";
 import { sendFirstPlayerMessage } from "../src/chat-api";
@@ -9,7 +10,8 @@ import {
   submitUniverseSetting,
 } from "../src/onboarding-submit";
 
-const repoRoot = path.resolve(import.meta.dir, "../../..");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "../../..");
 
 describe("US-001 - Universe Onboarding Screen", () => {
   test("US-001-AC01: initial app state renders onboarding with textarea and Begin Adventure button", () => {

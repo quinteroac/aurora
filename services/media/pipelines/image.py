@@ -30,31 +30,44 @@ class IllustriousPipeline:
       - vae_decode → PIL.Image            (comfy_diffusion.vae)
     """
 
+    def __init__(self, models_dir: str | None = None) -> None:
+        self._models_dir = models_dir or os.environ.get("MODELS_DIR", "models")
+
     def __call__(self, prompt: str) -> dict[str, str]:
-        models = importlib.import_module("comfy_diffusion.models")
-        conditioning = importlib.import_module("comfy_diffusion.conditioning")
+        importlib.import_module("comfy_diffusion").check_runtime()
+
+        models_mod = importlib.import_module("comfy_diffusion.models")
+        conditioning_mod = importlib.import_module("comfy_diffusion.conditioning")
         latent_mod = importlib.import_module("comfy_diffusion.latent")
-        sampling = importlib.import_module("comfy_diffusion.sampling")
+        lora_mod = importlib.import_module("comfy_diffusion.lora")
+        sampling_mod = importlib.import_module("comfy_diffusion.sampling")
         vae_mod = importlib.import_module("comfy_diffusion.vae")
 
-        models_dir = os.environ.get("MODELS_DIR", "models")
-        checkpoint = os.environ.get("CHECKPOINT", "illustrious_xl.safetensors")
+        mgr = models_mod.ModelManager(self._models_dir)
+        ckpt = mgr.load_checkpoint(os.environ.get("CHECKPOINT", "illustrious_xl.safetensors"))
 
-        mgr = models.ModelManager(models_dir)
-        ckpt = mgr.load_checkpoint(checkpoint)
+        lora_path = os.environ.get("LORA")
+        if lora_path and lora_path.strip():
+            ckpt.model, ckpt.clip = lora_mod.apply_lora(
+                ckpt.model,
+                ckpt.clip,
+                lora_path.strip(),
+                strength_model=1.0,
+                strength_clip=1.0,
+            )
 
-        positive = conditioning.encode_prompt(ckpt.clip, prompt)
-        negative = conditioning.encode_prompt(ckpt.clip, "")
+        positive = conditioning_mod.encode_prompt(ckpt.clip, prompt)
+        negative = conditioning_mod.encode_prompt(ckpt.clip, "")
 
         latent = latent_mod.empty_latent_image(width=1024, height=1024, batch_size=1)
 
-        denoised = sampling.sample(
+        denoised = sampling_mod.sample(
             ckpt.model,
             positive,
             negative,
             latent,
-            steps=20,
-            cfg=7.0,
+            steps=8,
+            cfg=1.0,
             sampler_name="dpmpp_2m",
             scheduler="karras",
             seed=42,

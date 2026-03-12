@@ -1,12 +1,21 @@
 import { createTool } from "@mastra/core/tools";
+import { z } from "zod";
 import type { MediaServiceClient, PollJobResult } from "../../media-service/client";
+import { resolveMediaServiceBaseUrl } from "../../media-service/client";
 
 export const defaultGenerateImagePollIntervalMs = 2_000;
 export const defaultGenerateImagePollTimeoutMs = 120_000;
 
-type GenerateImageToolInput = {
-  prompt: string;
-};
+const generateImageInputSchema = z.object({
+  prompt: z
+    .string()
+    .min(1)
+    .describe(
+      "Detailed English image prompt describing the scene: style, mood, lighting, characters, and composition."
+    ),
+});
+
+type GenerateImageToolInput = z.infer<typeof generateImageInputSchema>;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -30,15 +39,6 @@ const formatFailedImageGenerationError = (reason: string): string => {
   return `Image generation failed: ${reason}`;
 };
 
-export const isGenerateImageToolInput = (value: unknown): value is GenerateImageToolInput => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const input = value as Record<string, unknown>;
-  return typeof input.prompt === "string";
-};
-
 const resolvePollingConfig = (env = process.env) => {
   return {
     pollIntervalMs: parsePositiveInteger(env.GENERATE_IMAGE_POLL_INTERVAL_MS, defaultGenerateImagePollIntervalMs),
@@ -53,16 +53,16 @@ const readDoneResult = (jobStatus: PollJobResult): string | null => {
 export const createGenerateImageTool = (client: MediaServiceClient) =>
   createTool({
     id: "generate_image",
-    description: "Generate a scene image from a prompt using the Media Service.",
-    execute: async (inputData: unknown) => {
-      if (!isGenerateImageToolInput(inputData)) {
-        return formatFailedImageGenerationError("prompt must be a string");
-      }
-
+    description:
+      "Generate a scene image for the current narrative moment. Call this for every response — always paint the scene the player is experiencing.",
+    inputSchema: generateImageInputSchema,
+    execute: async (inputData: GenerateImageToolInput) => {
       const { prompt } = inputData;
       const { pollIntervalMs, timeoutMs } = resolvePollingConfig();
       const deadline = Date.now() + timeoutMs;
       const { job_id: jobId } = await client.submitJob(prompt);
+      const baseUrl = resolveMediaServiceBaseUrl();
+      const imageUrl = `${baseUrl}/jobs/${jobId}/image`;
 
       while (Date.now() <= deadline) {
         const jobStatus = await client.pollJob(jobId);
@@ -70,7 +70,20 @@ export const createGenerateImageTool = (client: MediaServiceClient) =>
         if (jobStatus.status === "done") {
           const imageB64 = readDoneResult(jobStatus);
           if (imageB64) {
-            return imageB64;
+            // Return a short URL to avoid sending base64 through the LLM context.
+            // #region agent log
+            process.stdout.write(
+              `${JSON.stringify({
+                event: "generate_image_result",
+                service: "backend",
+                jobId,
+                resultType: "url",
+                urlLen: imageUrl.length,
+                b64Len: imageB64.length,
+              })}\n`
+            );
+            // #endregion
+            return imageUrl;
           }
 
           return formatFailedImageGenerationError("missing image data");

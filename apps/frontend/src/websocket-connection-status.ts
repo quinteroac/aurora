@@ -108,9 +108,13 @@ export const useWebSocketConnectionStatus = () => {
       onNoticeChange: setNotice,
     });
 
-    controller.start();
+    // Defer connection so React Strict Mode's initial unmount doesn't open then immediately close a socket (browser logs "closed before connection")
+    const timeoutId = setTimeout(() => {
+      controller.start();
+    }, 0);
 
     return () => {
+      clearTimeout(timeoutId);
       controller.stop();
     };
   }, []);

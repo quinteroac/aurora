@@ -134,6 +134,16 @@ Does an appropriate asset exist in the library?
 
 All media generation runs on **comfy-diffusion** as a Python library — no ComfyUI server or node system.
 
+**First-time setup (so the service does not start in degraded mode):** comfy-diffusion is used from a local clone that includes the ComfyUI runtime as a submodule. After cloning Aurora, run:
+
+```bash
+git submodule update --init --recursive
+cd services/media/vendor/comfy-diffusion && git submodule update --init --recursive && cd ../../..
+cd services/media && uv sync
+```
+
+Then start the media service as usual. If the ComfyUI submodule is missing, `check_runtime()` fails and the service starts in degraded mode (503 on `/generate/image`).
+
 | Media Type | Model | comfy-diffusion module |
 |---|---|---|
 | Images (characters, scenes) | Flux / SDXL | `sampling`, `conditioning`, `vae` |
