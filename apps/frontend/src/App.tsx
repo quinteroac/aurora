@@ -1,6 +1,15 @@
-import { FormEvent, RefObject, useEffect, useRef, useState } from "react";
+import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AssistantRuntimeProvider,
+  ComposerPrimitive,
+  MessagePrimitive,
+  type ThreadMessageLike,
+  ThreadPrimitive,
+  useLocalRuntime,
+} from "@assistant-ui/react";
 import { sendFirstPlayerMessage } from "./chat-api";
 import { submitUniverseSetting, type AppView } from "./onboarding-submit";
+import { createWebSocketChatModelAdapter } from "./websocket-runtime";
 import "./App.css";
 
 const SUBMISSION_ERROR_MESSAGE = "Unable to begin your adventure right now. Please try again.";
@@ -13,6 +22,73 @@ type OnboardingScreenProps = {
   settingTextareaRef: RefObject<HTMLTextAreaElement>;
   validationMessage: string | null;
   clearValidationMessage: () => void;
+};
+
+type ChatScreenProps = {
+  firstPlayerMessage: string;
+};
+
+const ChatMessage = () => {
+  return (
+    <MessagePrimitive.Root className="chat-message">
+      <MessagePrimitive.If user>
+        <div className="message-bubble message-bubble-user">
+          <MessagePrimitive.Parts />
+        </div>
+      </MessagePrimitive.If>
+      <MessagePrimitive.If assistant>
+        <div className="message-bubble message-bubble-assistant">
+          <MessagePrimitive.Parts />
+        </div>
+      </MessagePrimitive.If>
+    </MessagePrimitive.Root>
+  );
+};
+
+export const ChatScreen = ({ firstPlayerMessage }: ChatScreenProps) => {
+  const chatModel = useMemo(() => createWebSocketChatModelAdapter(), []);
+  const initialMessages = useMemo<readonly ThreadMessageLike[] | undefined>(() => {
+    return firstPlayerMessage.length > 0
+      ? [
+          {
+            role: "user" as const,
+            content: [{ type: "text", text: firstPlayerMessage }],
+          },
+        ]
+      : undefined;
+  }, [firstPlayerMessage]);
+  const runtime = useLocalRuntime(chatModel, { initialMessages });
+
+  return (
+    <main className="chat-screen" aria-label="Adventure chat view">
+      <section className="chat-panel">
+        <h1>Adventure Chat</h1>
+        <AssistantRuntimeProvider runtime={runtime}>
+          <ThreadPrimitive.Root className="assistant-thread" data-testid="assistant-chat-thread">
+            <ThreadPrimitive.Viewport className="chat-viewport">
+              <ThreadPrimitive.Empty>
+                <p className="empty-chat-state">Start your adventure by describing your next move.</p>
+              </ThreadPrimitive.Empty>
+              <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
+              <ThreadPrimitive.If running>
+                <p className="typing-indicator" role="status" aria-live="polite">
+                  Narrator is weaving the next scene...
+                </p>
+              </ThreadPrimitive.If>
+            </ThreadPrimitive.Viewport>
+            <ComposerPrimitive.Root className="chat-composer">
+              <ComposerPrimitive.Input
+                className="chat-composer-input"
+                placeholder="What do you do next?"
+                aria-label="Send a message to the narrator"
+              />
+              <ComposerPrimitive.Send className="chat-send-button">Send</ComposerPrimitive.Send>
+            </ComposerPrimitive.Root>
+          </ThreadPrimitive.Root>
+        </AssistantRuntimeProvider>
+      </section>
+    </main>
+  );
 };
 
 export const OnboardingScreen = ({
@@ -102,17 +178,7 @@ function App() {
   };
 
   if (view === "chat") {
-    return (
-      <main className="chat-screen" aria-label="Adventure chat view">
-        <section className="chat-panel">
-          <h1>Adventure Chat</h1>
-          <p>Your universe has been sent to the narrator as your first message.</p>
-          <article className="first-message" aria-label="First player message">
-            {firstPlayerMessage}
-          </article>
-        </section>
-      </main>
-    );
+    return <ChatScreen firstPlayerMessage={firstPlayerMessage} />;
   }
 
   return (

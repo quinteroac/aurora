@@ -24,6 +24,11 @@
   box-shadow: 0 22px 80px rgb(2 8 16 / 55%);
 }
 
+.chat-panel {
+  display: grid;
+  gap: 1rem;
+}
+
 h1 {
   margin: 0;
   font-size: clamp(1.75rem, 3vw, 2.35rem);
@@ -81,10 +86,93 @@ h1 {
   cursor: progress;
 }
 
-.first-message {
-  margin-top: 1rem;
+.assistant-thread {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.chat-viewport {
+  border: 1px solid rgb(133 163 204 / 35%);
+  border-radius: 12px;
+  background: rgb(3 10 18 / 70%);
+  padding: 0.85rem;
+  min-height: 310px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.chat-message {
+  margin-bottom: 0.65rem;
+}
+
+.message-bubble {
+  max-width: 88%;
+  border-radius: 12px;
+  padding: 0.62rem 0.78rem;
   white-space: pre-wrap;
-  border-left: 3px solid #8eb8ff;
-  padding-left: 1rem;
-  color: #ebf2ff;
+}
+
+.message-bubble-user {
+  margin-left: auto;
+  border: 1px solid rgb(142 184 255 / 30%);
+  background: rgb(32 63 104 / 75%);
+  color: #f3f8ff;
+}
+
+.message-bubble-assistant {
+  margin-right: auto;
+  border: 1px solid rgb(118 144 176 / 32%);
+  background: rgb(14 28 44 / 80%);
+  color: #eaf1ff;
+}
+
+.empty-chat-state {
+  padding: 1.4rem;
+  text-align: center;
+  color: #cadcf5;
+}
+
+.typing-indicator {
+  margin: 0.5rem 0 0;
+  font-size: 0.95rem;
+  color: #d0e2ff;
+  opacity: 0.95;
+}
+
+.chat-composer {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.chat-composer-input {
+  width: 100%;
+  border: 1px solid #4f6989;
+  border-radius: 10px;
+  background: #101c2d;
+  color: #f5f8fd;
+  padding: 0.8rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.chat-composer-input:focus {
+  outline: 2px solid #90bcff;
+  outline-offset: 2px;
+}
+
+.chat-send-button {
+  justify-self: end;
+  border: 1px solid #8fb3e6;
+  border-radius: 10px;
+  padding: 0.6rem 1.1rem;
+  background: #2a466d;
+  color: #f7fbff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-send-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
